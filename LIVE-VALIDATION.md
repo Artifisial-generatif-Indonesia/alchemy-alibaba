@@ -89,3 +89,31 @@ private keys, passwords, or raw error dumps in the evidence.
 - [RDS release behavior](https://www.alibabacloud.com/help/en/rds/apsaradb-rds-for-mysql/release-or-unsubscribe-from-an-instance)
 - [RDS DestroyDBInstance: phased-out operation](https://www.alibabacloud.com/help/en/rds/developer-reference/api-rds-2014-08-15-destroydbinstance)
 - [Per-resource verification and known gaps](SUPPORT-MATRIX.md)
+
+## First RDS smoke stack
+
+[`examples/live-rds.alchemy.ts`](examples/live-rds.alchemy.ts) declares exactly
+six resources: a VPC, vSwitch, PostgreSQL Basic instance, generated account,
+database, and database-owner grant. It accepts only `test-rds-*` stages and uses
+Alchemy's persistent local state with an owner-only process umask. Run every
+command from the same dedicated private directory and retain that directory
+through cleanup; do not use an ephemeral checkout as the state location.
+
+The private environment file supplies `ALIBABA_CLOUD_PROFILE`,
+`ALIBABA_CLOUD_REGION`, `SMOKE_ZONE_ID`, `SMOKE_RDS_CLASS`, `SMOKE_RDS_VERSION`,
+`SMOKE_RDS_STORAGE_GB`, `SMOKE_RDS_STORAGE_TYPE`, and a generated
+`SMOKE_RDS_PASSWORD`. `SMOKE_REVISION` and `SMOKE_DELETION_PROTECTION` allow
+controlled in-place updates. Keep the synthetic password out of shell arguments
+and logs. Confirm current availability and quote the selected SKU before apply.
+
+Use the Alchemy `plan` command with the absolute stack path, the `test-rds-*`
+stage, and `--env-file` pointing to that private file. The initial plan must show
+only these six creates. After spending approval, use `deploy`, unchanged
+reapply, controlled updates, and `destroy` with the same paths and stage.
+
+The stack initially allows only `127.0.0.1` and creates no public endpoint.
+A real SQL test additionally needs a separately tracked temporary public
+connection, a dedicated allowlist group restricted to the runner's current
+public IPv4 `/32`, and SSL with certificate verification. Remove that connection
+and allowlist group before teardown. Do not change the create-time whitelist
+input to run this check: create identity changes can replace the instance.
