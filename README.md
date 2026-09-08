@@ -162,8 +162,13 @@ The initial release is installable directly from GitHub; pin a full commit in
 application lockfiles. It is not yet published to the npm registry.
 
 ```sh
-npm install alchemy-alibaba@github:Artifisial-generatif-Indonesia/alchemy-alibaba#v0.1.0 alchemy@2.0.0-beta.72 effect@4.0.0-rc.112
+npx --yes npm@11.19.1 install alchemy-alibaba@github:Artifisial-generatif-Indonesia/alchemy-alibaba#v0.1.0 alchemy@2.0.0-beta.72 effect@4.0.0-rc.112
 ```
+
+The fresh-project command above was verified with Node 22 and npm 11.19.1,
+an empty cache, and SSH disabled. npm 10.9.8 crashed in its peer-dependency
+resolver (`edgesOut`) for a fresh graph; use npm 11.19.1 for initial resolution.
+Existing locked installs with `npm ci` also pass on npm 10.9.8.
 
 Alchemy and Effect are exact peer dependencies because both APIs are prerelease.
 The package ships compiled ESM and declarations; Git installs build them with
