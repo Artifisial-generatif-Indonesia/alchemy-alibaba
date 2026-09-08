@@ -23,6 +23,7 @@ The exact versions pinned by this repository are:
 
 | Service | Package | Version |
 | --- | --- | --- |
+| ECS | `@alicloud/ecs20140526` | `7.11.2` |
 | VPC | `@alicloud/vpc20160428` | `7.2.5` |
 | ACK | `@alicloud/cs20151215` | `7.2.0` |
 | ACR | `@alicloud/cr20181201` | `2.2.3` |
@@ -203,3 +204,11 @@ checks. The pinned SDK documents these statuses in
 `DescribeDbinstanceSslresponseBody.ts`.
 
 No connected operations are needed for these protocol tests.
+
+## ECS scope
+
+See [ECS.md](ECS.md) for the constrained standalone VM and security-group API
+contract and the additional protocol tests in `src/protocol/ecs.test.ts`. ECS
+request construction is explicit: raw SDK extras cannot enable batch purchases,
+subscriptions, inherited passwords, extra disks or independent public IPs.
+ECS live validation remains pending.

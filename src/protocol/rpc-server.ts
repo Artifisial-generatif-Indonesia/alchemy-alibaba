@@ -12,7 +12,7 @@ import {
 } from "./world.ts";
 
 const SENSITIVE_PARAM =
-  /^(?:AccessKeyId|AccessKeySecret|Signature|SecurityToken|AccountPassword|Password|ServerKey|BearerToken)$/i;
+  /^(?:AccessKeyId|AccessKeySecret|Signature|SecurityToken|AccountPassword|Password|ServerKey|UserData|BearerToken)$/i;
 
 const readBody = (request: http.IncomingMessage): Promise<string> =>
   new Promise((resolve, reject) => {

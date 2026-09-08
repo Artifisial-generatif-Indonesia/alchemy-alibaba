@@ -1,3 +1,11 @@
+import {
+  Instance as ECSInstance,
+  InstanceProvider as ECSInstanceProvider,
+  SecurityGroup,
+  SecurityGroupProvider,
+  SecurityGroupIngress,
+  SecurityGroupIngressProvider,
+} from "./ecs/index.ts";
 import * as Provider from "alchemy/Provider";
 import * as Layer from "effect/Layer";
 import {
@@ -69,6 +77,9 @@ export const resourceProviders = (options: AlibabaProviderOptions = {}) =>
   Layer.effect(
     Providers,
     Provider.collection([
+      ECSInstance,
+      SecurityGroup,
+      SecurityGroupIngress,
       Network,
       VSwitch,
       ManagedCluster,
@@ -91,6 +102,9 @@ export const resourceProviders = (options: AlibabaProviderOptions = {}) =>
   ).pipe(
     Layer.provide(
       Layer.mergeAll(
+        ECSInstanceProvider({ wait: options.wait }),
+        SecurityGroupProvider({ wait: options.wait }),
+        SecurityGroupIngressProvider({ wait: options.wait }),
         NetworkProvider({
           wait: options.wait,
           deleteDependencyWait: options.deleteDependencyWait,

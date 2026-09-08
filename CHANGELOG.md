@@ -8,6 +8,12 @@ not claimed.
 
 ### Changes
 
+- Add ECS instances, security groups, and IPv4 ingress rules, plus a persistent
+  dev-stage example wiring private RDS/Tair allowlists to the VM IP. ECS uses
+  one pay-as-you-go instance, explicit replacement for immutable settings,
+  graceful deletion, and optional absolute auto-release scheduling. See ECS.md.
+- Custom `AlibabaClientSet` implementations must supply the new `ecs` client.
+
 - Fix lifecycle reliability across Alibaba VPC, RDS, Tair, ACK, and ACR:
   bounded observation/retry, explicit absence errors, regional/paginated
   recovery, stable identities, ownership checks, and child-first teardown.
@@ -24,8 +30,8 @@ not claimed.
 
 ### Validation
 
-158 tests across 18 files, TypeScript checking, and build pass. Package validation
-checks the exact file list, all nine public imports, consumer TypeScript usage,
+171 tests across 19 files, TypeScript checking, and build pass. Package validation
+checks the exact file list, all ten public imports, consumer TypeScript usage,
 and a fresh consumer audit with the documented dependency overrides.
 
 A disposable PostgreSQL 16/VPC/vSwitch run verified provisioning, unchanged
@@ -45,6 +51,8 @@ PostgreSQL ownership-revocation case; it was not an unattended success.
   that binding. The provider will not drop a database or account to revoke it.
 - RDS recycle-bin destruction is not modeled; ordinary release does not prove
   permanent data removal. Final billing and recycle-bin cleanup remain unverified.
+- ECS has no connected validation yet; application/bootstrap readiness, expiry,
+  disk/IP release, and real database connectivity still need live checks.
 - ACK/ACR do not yet have complete live lifecycle validation. Tair live evidence
   remains partial. Optional engine, scaling, rollout, and component controls are
   not exhaustively simulated. See SUPPORT-MATRIX.md and LIVE-VALIDATION.md.

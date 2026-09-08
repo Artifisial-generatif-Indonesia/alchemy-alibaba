@@ -184,6 +184,7 @@ this candidate.
 
 | Stage | Resources and checks | Completion evidence |
 | --- | --- | --- |
+| ECS + private databases | VM, system disk, security group and SSH rule; same-VPC RDS/Tair /32 groups; no-op, metadata/tags/protection, bootstrap, replacement and expiry | Verify real TLS SQL/Tair access, changed IP allowlists, graceful stop/delete, and independent disk/IP/group cleanup; app readiness is separate from Running |
 | PostgreSQL + VPC | Network/vSwitch, instance, database, account, DBOwner binding, dedicated IP group; unchanged reapply, metadata, password rotation, SSL completion, protection cycle, runner restart, TLS SQL and transaction rollback | Stable IDs, old password rejected, supported updates independently observed; ordinary PostgreSQL binding deletion reports the documented limitation and preserves state |
 | PostgreSQL recovery | Review synthetic ownership/permission cleanup separately, close public access, resume saved-state destroy | Record the intervention explicitly; instance, managed attachments, vSwitch and VPC absent; backups/recycle-bin disposition recorded separately |
 | RDS MySQL | Database/account/privilege/IP group lifecycle; grant, change, revoke, password rotation, supported resize and protection changes | Independent reads prove privilege removal; child-before-parent destroy succeeds without the PostgreSQL workaround |

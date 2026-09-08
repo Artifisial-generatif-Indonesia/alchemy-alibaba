@@ -1,5 +1,6 @@
 import ACRClientImport from "@alicloud/cr20181201";
 import { $OpenApiUtil } from "@alicloud/openapi-core";
+import ECSClientImport from "@alicloud/ecs20140526";
 import ACKClientImport from "@alicloud/cs20151215";
 import TairClientImport from "@alicloud/r-kvstore20150101";
 import RDSClientImport from "@alicloud/rds20140815";
@@ -30,6 +31,7 @@ const interopDefault = <Value>(value: Value | CommonJsDefault<Value>): Value =>
   hasCommonJsDefault(value) ? value.default : value;
 
 const ACRClient = interopDefault(ACRClientImport);
+const ECSClient = interopDefault(ECSClientImport);
 const ACKClient = interopDefault(ACKClientImport);
 const RDSClient = interopDefault(RDSClientImport);
 const TairClient = interopDefault(TairClientImport);
@@ -47,6 +49,7 @@ const clientConfig = (host: string) =>
   });
 
 export const protocolClients = (host: string): AlibabaClientSet => ({
+  ecs: new ECSClient(clientConfig(host)),
   ack: new ACKClient(clientConfig(host)),
   acr: new ACRClient(clientConfig(host)),
   tair: new TairClient(clientConfig(host)),

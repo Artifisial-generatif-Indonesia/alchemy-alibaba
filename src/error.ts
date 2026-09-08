@@ -5,6 +5,7 @@ import * as Schema from "effect/Schema";
 import * as Predicate from "effect/Predicate";
 
 export const AlibabaService = Schema.Literals([
+  "ECS",
   "ACK",
   "ACR",
   "Tair",
@@ -230,6 +231,7 @@ export const isRetryableObservation = (error: unknown): boolean =>
   (isTransient(error) || error.code === "SafeRetryBudgetExceeded");
 
 const absentResourceCodes: Record<AlibabaService, ReadonlySet<string>> = {
+  ECS: new Set(["InvalidInstanceId.NotFound", "InvalidSecurityGroupId.NotFound", "InvalidSecurityGroupRuleId.NotFound"]),
   VPC: new Set([
     "InvalidVpcId.NotFound",
     "InvalidVSwitchId.NotFound",

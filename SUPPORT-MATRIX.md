@@ -165,3 +165,20 @@ cleanup command.
 None. Environment and Kubernetes consumers read resource attributes
 (`connectionDomain`, `port`, kubeconfig fetch scripts, ACR instance id).
 Adding `Binding` types would be speculative.
+
+## ECS additions for 0.2.0
+
+| Resource | Supported behavior | Local evidence | Live |
+| --- | --- | --- | --- |
+| `ECS.Instance` | One PostPaid VM; create/read, metadata/tags/protection/expiry updates, restart stopped VM, replacement for immutable settings, graceful stop/delete | Pinned SDK loopback with persisted Alchemy state, failures and recovery | Pending |
+| `ECS.SecurityGroup` | Normal VPC group; create/read, description/tags, replacement, bounded dependency-aware delete | SDK loopback and persisted lifecycle | Pending |
+| `ECS.SecurityGroupIngress` | One adoptable IPv4 inbound allow tuple; create/read, replace, delete by observed rule ID | SDK loopback, permission pagination, preservation of unrelated rule ownership | Pending |
+
+Instances depend on security groups and VPC/vSwitches. RDS/Tair named IP groups
+can depend on `Instance.privateIp` using `Output.interpolate`, ordering access
+cleanup before instance deletion. ECS instance and group inventory is regional
+and paginated, and ambiguous names fail explicitly. ECS adds two tagged resource
+types to the enumeration table above; ingress is parent-keyed and has no regional
+list. See [ECS.md](ECS.md) for adoption, replacement, shutdown, auto-expiry,
+bootstrap and retention boundaries. No standalone data disk, EIP, IPv6/egress
+rule or cloud-init completion resource is included.

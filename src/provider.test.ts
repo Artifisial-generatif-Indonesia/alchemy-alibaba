@@ -1,4 +1,5 @@
 import ACRClient, * as ACR from "@alicloud/cr20181201";
+import ECSClient from "@alicloud/ecs20140526";
 import ACKClient from "@alicloud/cs20151215";
 import { $OpenApiUtil } from "@alicloud/openapi-core";
 import TairClient from "@alicloud/r-kvstore20150101";
@@ -125,6 +126,7 @@ const alchemyRuntime = Layer.mergeAll(
 );
 
 const clientSet = (acr: ACRClient): AlibabaClientSet => ({
+  ecs: new ECSClient(config()),
   ack: new ACKClient(config()),
   acr,
   tair: new TairClient(config()),
@@ -157,6 +159,9 @@ describe("Alibaba Alchemy provider", () => {
       "Alibaba.ACR.Namespace",
       "Alibaba.ACR.Repository",
       "Alibaba.ACR.VpcEndpointLink",
+      "Alibaba.ECS.Instance",
+      "Alibaba.ECS.SecurityGroup",
+      "Alibaba.ECS.SecurityGroupIngress",
       "Alibaba.RDS.Account",
       "Alibaba.RDS.AccountPrivilege",
       "Alibaba.RDS.Database",

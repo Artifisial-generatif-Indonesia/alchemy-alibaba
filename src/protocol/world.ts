@@ -1,3 +1,4 @@
+import { EcsResources } from "./ecs-resources.ts";
 import { RoaResources, type RoaBody } from "./roa-resources.ts";
 import { RpcResources } from "./rpc-resources.ts";
 export type RpcParams = Record<string, string>;
@@ -207,6 +208,7 @@ export class ProtocolWorld {
   readonly vswitches = new Map<string, VSwitchRecord>();
   readonly tair = new Map<string, TairRecord>();
   readonly rds = new Map<string, RdsRecord>();
+  readonly ecs = new EcsResources();
   readonly resources = new RpcResources((id) => this.rds.get(id)?.engine);
   readonly roa = new RoaResources();
   readonly ack = new Map<string, AckRecord>();
@@ -280,7 +282,7 @@ export class ProtocolWorld {
       };
     }
 
-    const child = this.resources.dispatch(action, params, version);
+    const child = version === "2014-05-26" ? this.ecs.dispatch(action, params) : this.resources.dispatch(action, params, version);
     if (child)
       return fault?.accept
         ? {

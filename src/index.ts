@@ -1,3 +1,4 @@
+export * as ECS from "./ecs/index.ts";
 export * as ACK from "./ack/index.ts";
 export * as ACR from "./acr/index.ts";
 export * as Tair from "./tair/index.ts";

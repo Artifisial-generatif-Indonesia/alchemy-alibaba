@@ -48,6 +48,10 @@
     "./vpc": {
       "types": "./dist/vpc/index.d.ts",
       "import": "./dist/vpc/index.js"
+    },
+    "./ecs": {
+      "types": "./dist/ecs/index.d.ts",
+      "import": "./dist/ecs/index.js"
     }
   },
   "files": [
@@ -58,7 +62,8 @@
     "SPEC-COVERAGE.md",
     "LIVE-VALIDATION.md",
     "CHANGELOG.md",
-    "RELEASE.md"
+    "RELEASE.md",
+    "ECS.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -74,6 +79,7 @@
     "@alicloud/cr20181201": "2.2.3",
     "@alicloud/credentials": "2.4.7",
     "@alicloud/cs20151215": "7.2.0",
+    "@alicloud/ecs20140526": "7.11.2",
     "@alicloud/openapi-core": "1.0.8",
     "@alicloud/r-kvstore20150101": "6.4.0",
     "@alicloud/rds20140815": "15.9.0",
@@ -84,12 +90,12 @@
     "effect": "4.0.0-rc.112"
   },
   "devDependencies": {
+    "@effect/platform-node": "4.0.0-rc.112",
+    "@types/node": "22.19.7",
     "alchemy": "2.0.0-beta.76",
     "effect": "4.0.0-rc.112",
-    "@effect/platform-node": "4.0.0-rc.112",
     "typescript": "6.0.3",
-    "vitest": "4.1.11",
-    "@types/node": "22.19.7"
+    "vitest": "4.1.11"
   },
   "overrides": {
     "lodash": "4.18.1",

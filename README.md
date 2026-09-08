@@ -1,6 +1,6 @@
 # Alibaba Cloud providers for Alchemy v2
 
-Reusable VPC, ACK, ACR, RDS and Tair resources using the official Alibaba SDKs and Effect. This is an independent community provider, not an official Alibaba or Alchemy package.
+Reusable ECS, VPC, ACK, ACR, RDS and Tair resources using the official Alibaba SDKs and Effect. This is an independent community provider, not an official Alibaba or Alchemy package.
 
 **Release:** `0.2.0` is prepared for npm's `latest` channel. Read the
 [release notes](CHANGELOG.md) and [validation limits](#validation-limits) before
@@ -35,6 +35,9 @@ is not treated as proof that Alibaba has detached its hidden vSwitch relation.
 
 | Service | Resource            | Supported lifecycle and features                                                                                                                                                                             |
 | ------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| ECS | `Instance` | One pay-as-you-go VM, system disk, cloud-init, private/optional public IP, metadata/protection/expiry updates, graceful teardown |
+| ECS | `SecurityGroup` | Tagged normal VPC security group, description and tag updates, dependency-aware deletion |
+| ECS | `SecurityGroupIngress` | One IPv4 inbound allow rule, paginated observation and deletion by rule ID |
 | VPC     | `Network`           | create/read/update/delete, complete create/modify request inputs, deterministic naming, ownership tags, tag drift, idempotency tokens, readiness and deletion waits                                          |
 | VPC     | `VSwitch`           | create/read/update/delete, complete create/modify request inputs, immutable network/zone/CIDR identity, ownership tags, tag drift, idempotency tokens, readiness and deletion waits                          |
 | ACK     | `ManagedCluster`    | create/read/update/upgrade/delete, full create/modify/upgrade/delete request inputs, deterministic naming, ownership tags, tag drift, deletion protection, retained-resource delete options, readiness waits |
@@ -70,7 +73,7 @@ implemented lifecycle, protocol tests, and connected merge bar.
 chain. The provider itself reads only configuration through Effect:
 
 - `ALIBABA_CLOUD_REGION` is required;
-- `ALIBABA_CLOUD_VPC_ENDPOINT`, `ALIBABA_CLOUD_ACK_ENDPOINT`,
+- `ALIBABA_CLOUD_ECS_ENDPOINT`, `ALIBABA_CLOUD_VPC_ENDPOINT`, `ALIBABA_CLOUD_ACK_ENDPOINT`,
   `ALIBABA_CLOUD_ACR_ENDPOINT`, `ALIBABA_CLOUD_TAIR_ENDPOINT`, and
   `ALIBABA_CLOUD_RDS_ENDPOINT` are optional;
 - access keys, STS, OIDC/RAM roles, ECS roles, CLI profiles, and URI credentials
@@ -118,13 +121,14 @@ material, use `Redacted.Redacted<string>`. Create them with
 
 ## Adoption and deletion semantics
 
-VPC networks/vSwitches, ACK clusters/node pools, and Tair/RDS instances carry
+ECS instances/security groups, VPC networks/vSwitches, ACK clusters/node pools,
+and Tair/RDS instances carry
 `alchemy::stack`, `alchemy::stage`, and `alchemy::id` ownership tags. A matching
 physical resource without those tags is reported as unowned, so Alchemy's
 normal `adopt` policy decides whether takeover is allowed.
 
 ACK addons, ACR namespaces/repositories, Tair/RDS accounts, databases,
-privileges, and whitelist groups do not expose safe ownership metadata. They
+privileges, ECS ingress rules, and whitelist groups do not expose safe ownership metadata. They
 are silently adoptable by their compound cloud identity, matching Alchemy's
 policy for APIs without ownership primitives.
 
@@ -133,8 +137,9 @@ to retain at least one address, so destroying an `RDS.SecurityIpGroup` resets it
 to `127.0.0.1` by default; set `resetTo` when another safe baseline is needed.
 
 An ordinary `destroy` is planned from persisted state, so losing a resource's
-state row leaves nothing for that destroy to tear down. The six tagged resources
-(VPC network/vSwitch, ACK cluster/node pool, RDS instance, Tair instance)
+state row leaves nothing for that destroy to tear down. The eight tagged resources
+(ECS instance/security group, VPC network/vSwitch, ACK cluster/node pool,
+RDS instance, Tair instance)
 therefore implement `list` — the one observation path that needs no state, and
 so the only way to find an orphan whose state row is gone.
 
@@ -227,3 +232,10 @@ ACK/ACR lack complete live lifecycle validation; Tair evidence remains partial.
 Review the [support matrix](SUPPORT-MATRIX.md) and [live evidence](LIVE-VALIDATION.md)
 for the intended configuration before production adoption. Installation performs
 no cloud deployment.
+
+## Disposable ECS environments
+
+See [ECS.md](ECS.md) for the supported VM lifecycle, networking, disk retention,
+and [the private RDS/Tair access example](examples/ecs.alchemy.ts). ECS has local
+SDK protocol coverage; its live acceptance run is still pending. Custom
+`AlibabaClientSet` implementations now also need an `ecs` SDK client.

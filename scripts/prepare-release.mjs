@@ -36,7 +36,7 @@ try {
   assert.equal(packed.name, pkg.name);
   assert.equal(packed.version, pkg.version);
   const files = new Set(packed.files.map(file => file.path));
-  const expected = new Set(["package.json", "README.md", "LICENSE", "SUPPORT-MATRIX.md", "SPEC-COVERAGE.md", "LIVE-VALIDATION.md", "CHANGELOG.md", "RELEASE.md"]);
+  const expected = new Set(["package.json", "README.md", "LICENSE", "SUPPORT-MATRIX.md", "SPEC-COVERAGE.md", "LIVE-VALIDATION.md", "CHANGELOG.md", "RELEASE.md", "ECS.md"]);
   async function compiledFiles(directory, relative = "") {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       const name = path.posix.join(relative, entry.name);
@@ -67,7 +67,7 @@ try {
   const imports = Object.keys(pkg.exports).map(key => pkg.name + (key === "." ? "" : key.slice(1)));
   await writeFile(path.join(consumer, "imports.mjs"), imports.map(name => `await import(${JSON.stringify(name)});`).join("\n"));
   execFileSync(process.execPath, ["imports.mjs"], { cwd: consumer, timeout: 60_000, stdio: "pipe" });
-  await writeFile(path.join(consumer, "consumer.ts"), `import * as Alibaba from "${pkg.name}";\nimport type { InstanceProps } from "${pkg.name}/rds";\nconst props: InstanceProps = { create: { engine: "PostgreSQL", engineVersion: "16.0", DBInstanceClass: "example", DBInstanceStorage: 20, DBInstanceNetType: "Intranet", payType: "Postpaid", securityIPList: "127.0.0.1" } };\nvoid props; void Alibaba.RDS.Instance;\n`);
+  await writeFile(path.join(consumer, "consumer.ts"), `import * as Alibaba from "${pkg.name}";\nimport type { InstanceProps } from "${pkg.name}/rds";\nconst props: InstanceProps = { create: { engine: "PostgreSQL", engineVersion: "16.0", DBInstanceClass: "example", DBInstanceStorage: 20, DBInstanceNetType: "Intranet", payType: "Postpaid", securityIPList: "127.0.0.1" } };\nimport type { InstanceProps as EcsProps } from "${pkg.name}/ecs";\nconst vm: EcsProps = { imageId: "image", instanceType: "type", vSwitchId: "vswitch", securityGroupIds: ["group"] };\nvoid vm; void Alibaba.ECS.Instance; void props; void Alibaba.RDS.Instance;\n`);
   execFileSync(process.execPath, [path.join(root, "node_modules/typescript/bin/tsc"), "--noEmit", "--module", "NodeNext", "--moduleResolution", "NodeNext", "--target", "ES2022", "--skipLibCheck", "consumer.ts"], { cwd: consumer, timeout: 60_000, stdio: "pipe" });
   const sha256 = createHash("sha256").update(await readFile(tarball)).digest("hex");
   await mkdir(output, { recursive: true });
