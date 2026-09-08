@@ -24,12 +24,12 @@ registered. Do not add them speculatively.
 | vSwitch | RDS instance | `vSwitchId` | Create/delete + ENI hold | PostgreSQL smoke: release and delayed ENI cleanup verified |
 | vSwitch | Tair instance | `vSwitchId` | Yes, including delayed `DependencyViolation.Kvstore` | Partial: Tair purged; vSwitch/VPC still held |
 | vSwitch | ACR VPC endpoint | `vswitchId` | Yes | Not connected |
-| ACK cluster | Addon | `clusterId` | Simulator stub only | Not connected |
-| ACK cluster | Node pool | `clusterId` | Simulator stub only | Not connected |
-| ACR instance | Namespace / repository | `instanceId` | Subclass only | Read-only smoke for instance reference |
+| ACK cluster | Addon | `clusterId` | Install/configure/upgrade/uninstall + task waits | Not connected |
+| ACK cluster | Node pool | `clusterId` | Create/image update/delete + failed task recovery | Not connected |
+| ACR instance | Namespace / repository | `instanceId` | Persisted lifecycle + failure envelope | Read-only smoke for instance reference |
 | ACR instance | VPC endpoint | `instanceId` + VPC/vSwitch | Yes | Not connected |
-| RDS instance | Database / accounts / privileges / IP group | `instanceId` | Subclass only | Partial: PostgreSQL smoke; grant revocation unsupported |
-| Tair instance | Account / IP group | `instanceId` | Subclass only | Not connected |
+| RDS instance | Database / accounts / privileges / IP group | `instanceId` | Persisted lifecycle + blocked PostgreSQL revoke | Partial: PostgreSQL smoke; grant revocation unsupported |
+| Tair instance | Account / IP group | `instanceId` | RPC child lifecycle (parent ID supplied) | Not connected |
 | Tair instance | SSL / VPC auth / eviction | same resource mutations | Protocol + stack | Failed on first configure deploy |
 | Provider outputs | env / kubeconfig | attributes, not bindings | n/a | Not connected |
 
@@ -42,22 +42,55 @@ implemented or not verified; **—** not applicable.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `VPC.Network` | Y | Y | Y (name/description) | Y if create identity changes | Y | `DeleteVpc` after bounded dependency wait (NAT/EIP/security-group/ENI stragglers) | Alchemy tags; unowned without them | `ClientToken` from Alchemy instance id | Observe by name; tokenized retry | DescribeVpcs pages | N | Pending (configuring), Available, Deleting | Persisted redeploy | Y | — | Subclass + protocol + stack | PostgreSQL smoke create/update/delete passed | No extra optional VPC features (IPv6, DNS, route tables) |
 | `VPC.VSwitch` | Y | Y | Y (name/description) | Y if vpc/zone/cidr change | Y | `DeleteVSwitch` after bounded ENI/Kvstore wait | Alchemy tags | `ClientToken` | Concurrent create is transient (`IncorrectVSwitchStatus`) | Describe by VPC/name | N | Pending/Available | Persisted redeploy | Y | — | Subclass + protocol + stack | PostgreSQL smoke passed; older Tair smoke reported Kvstore hold | Waiter is a safety net, not a substitute for Tair recycle-bin absence |
-| `ACK.ManagedCluster` | Y | Y | Modify/upgrade | Y if create identity changes | Y | `DeleteCluster` + task wait; ENIs can remain | Alchemy tags | None; observe by name | N | `DescribeClustersV1`, region-scoped + paged | N | creating/running/deleting via task | Subclass | Y | kubeconfig not stored | Subclass + protocol stack | Not connected | Node-pool/addon protocol, managed ENI inventory, deletion-protection races |
-| `ACK.NodePool` | Y | Y | Y | scaling-group identity | Y | Delete + task wait | Scaling-group Alchemy tags | None | N | Name lookup within the cluster | N | Task wait | Subclass | Y | — | Subclass | Not connected | No protocol simulator for node-pool ROA |
-| `ACK.Addon` | Y (install) | Y | Configure/upgrade | Compound identity | Y (uninstall) | Uninstall + task | Compound identity; silent adopt | None | N | Cluster/name | N | Task wait | Subclass | — | Config JSON | Subclass | Not connected | No protocol coverage |
+| `ACK.ManagedCluster` | Y | Y | Modify/upgrade | Y if create identity changes | Y | `DeleteCluster` + task wait; ENIs can remain | Alchemy tags | None; observe by name | Accepted-create error recovered by v1 name inventory | `DescribeClustersV1`, region-scoped + paged | N | creating/running/deleting via task | Persisted redeploy/recovery | Y | kubeconfig not stored | Subclass + protocol + stack | Not connected | Advanced upgrade policies and live deletion-protection races unverified |
+| `ACK.NodePool` | Y | Y | Y | scaling-group identity | Y | Delete + task wait | Scaling-group Alchemy tags | None | N | Name lookup within the cluster | N | Task wait | Persisted redeploy/recovery | Y | — | Subclass + protocol + stack | Not connected | Advanced scaling/rollout controls not exhaustively simulated |
+| `ACK.Addon` | Y (install) | Y | Configure/upgrade | Compound identity | Y (uninstall) | Uninstall + task | Compound identity; silent adopt | None | N | Cluster/name | N | Task wait | Persisted redeploy | — | Config JSON | Subclass + protocol + stack | Not connected | Canary policies and component-specific configuration unverified |
 | `ACR.InstanceReference` | N (retained) | Y | N | N | No-op; nuke skip | Never deletes the paid instance | Retained reference | — | — | Get by id | N | RUNNING | Subclass + protocol read | Observed | — | Subclass + protocol | Read-only plan smoke | Purchase/delete is out of scope |
-| `ACR.Namespace` | Y | Y | Y | Compound identity | Y | Delete namespace | Compound identity; silent adopt | None | N | Get by instance+name | ACR `IsSuccess` envelope | NORMAL | Subclass | — | — | Subclass | Not connected | No protocol coverage |
-| `ACR.Repository` | Y | Y | Y | Compound identity | Y | Delete repo | Compound identity; silent adopt | None | N | Get | Envelope | — | Subclass | — | — | Subclass | Not connected | No protocol coverage |
-| `ACR.EndpointAclEntry` | Y | Y | Comment replacement | Compound identity | Y | Delete ACL entry | Compound identity | None | N | Get endpoint | Envelope | — | Subclass | — | — | Subclass | Not connected | No protocol coverage |
-| `ACR.VpcEndpointLink` | Y | Y | N | Compound identity | Y | Unlink VPC | Compound identity | None | N | Get endpoint links | Envelope | RUNNING wait | Subclass + protocol stack | — | — | Subclass + protocol | Not connected | PrivateZone option not protocol-tested |
-| `RDS.Instance` | Y | Y | Resize/SSL/protect/tags | Y if create identity changes | Y | `DeleteDBInstance` after not-Creating | Alchemy tags | `ClientToken` | Ambiguous create by name | Region-scoped SearchKey/name pages | Private endpoint wait | Creating/Running; delete rejected while Creating | Ambiguous-create recovery in protocol stack | Y | SSL key material redacted | Subclass + protocol | Partial: PostgreSQL smoke; see LIVE-VALIDATION.md | Recycle-bin / permanent RDS destroy not modeled; ENIs after delete |
-| `RDS.Database` | Y | Y | Description | Compound identity | Y | Delete database | Compound identity | None | N | Describe | N | — | Subclass | — | — | Subclass | Partial: PostgreSQL smoke; see LIVE-VALIDATION.md | No protocol coverage |
-| `RDS.Account` | Y | Y | Description/password | Compound identity | Y | Delete account | Compound identity | None | N | Describe | N | — | Subclass | — | Password redacted | Subclass | Partial: PostgreSQL smoke; see LIVE-VALIDATION.md | No protocol coverage |
-| `RDS.AccountPrivilege` | Y | Y | Grant/change | Compound identity | P (engine-dependent revoke) | PostgreSQL revoke unsupported | Compound identity | None | N | Describe | N | — | Subclass | — | — | Subclass | PostgreSQL grant/read passed; teardown required database cleanup | PostgreSQL ordinary bindings fail deletion explicitly; no protocol coverage |
-| `RDS.SecurityIpGroup` | Y | Y | Cover | Compound identity | Reset, not empty | Reset to `127.0.0.1` by default | Compound identity | None | N | Describe | N | — | Subclass | — | — | Subclass | Partial: PostgreSQL smoke; see LIVE-VALIDATION.md | Destroy cannot remove the last IP |
-| `Tair.Instance` | Y | Y | Spec/SSL/auth/config/protect/tags/password | Y if name/create identity changes | Y | `DeleteInstance` → `Released` (hidden from `DescribeInstances`) → `DestroyInstance` → overview absence | Alchemy tags | Create **`Token`** from Alchemy instance id; spec `ClientToken` from generation + desired-spec hash + operation nonce | `CanNotAcquireLock` and other ambiguous creates recover by name; lock is **not** a generic retry | `DescribeInstances` pages; overview for recycle bin | Creating attributes can omit id/name; list supplies identity | Creating → Normal; Normal can still reject mutations; Released ≠ absent | Unpersisted-create recovery + persisted redeploy | Y | Password redacted; never snapshotted on the wire | Subclass + protocol + stack | Tair smoke: create/lock/Normal/SSL/`IncorrectDBInstanceState`; delete required DestroyInstance; Kvstore hold outlived destroy | Mutation completion is per-operation wait, not a generic `Normal`; no Tair backup/restore/whitelist protocol |
-| `Tair.Account` | Y | Y | Description/password | Compound identity | Y | Delete account | Compound identity | None | N | Describe | N | Available | Subclass | — | Password redacted | Subclass | Not connected | No protocol coverage |
-| `Tair.SecurityIpGroup` | Y | Y | Cover | Compound identity | Y | Delete group | Compound identity | None | N | Describe | N | — | Subclass | — | — | Subclass | Not connected | No protocol coverage |
+| `ACR.Namespace` | Y | Y | Y | Compound identity | Y | Delete namespace | Compound identity; silent adopt | None | N | Get by instance+name | ACR `IsSuccess` envelope | NORMAL | Persisted redeploy | — | — | Subclass + protocol + stack | Not connected | Live behavior unverified |
+| `ACR.Repository` | Y | Y | Y | Compound identity | Y | Delete repo | Compound identity; silent adopt | None | N | Get | Envelope | — | Persisted redeploy | — | — | Subclass + protocol + stack | Not connected | Live behavior unverified |
+| `ACR.EndpointAclEntry` | Y | Y | Comment replacement | Compound identity | Y | Delete ACL entry | Compound identity | None | N | Get endpoint | Envelope | — | Persisted redeploy | — | — | Subclass + protocol + stack | Not connected | Live endpoint enablement and shared access behavior unverified |
+| `ACR.VpcEndpointLink` | Y | Y | N | Compound identity | Y | Unlink VPC | Compound identity | None | N | Get endpoint links | Envelope | RUNNING wait | Subclass + protocol stack | — | — | Subclass + protocol | Not connected | PrivateZone request flag verified; DNS side effects require live validation |
+| `RDS.Instance` | Y | Y | Resize/SSL/protect/tags | Y if create identity changes | Y | `DeleteDBInstance` after not-Creating | Alchemy tags | `ClientToken` | Ambiguous create by name | Region-scoped SearchKey/name pages | Private endpoint wait | Creating/Running; resize wait; SSL setting/success/failed | Persisted redeploy | Y | SSL key material redacted | Subclass + protocol + stack | Partial: PostgreSQL smoke; see LIVE-VALIDATION.md | Recycle-bin / permanent RDS destroy not modeled; ENIs after delete |
+| `RDS.Database` | Y | Y | Description | Compound identity | Y | Delete database | Compound identity | None | N | Describe | N | — | Persisted redeploy | — | — | Subclass + protocol + stack | Partial: PostgreSQL smoke; see LIVE-VALIDATION.md | Engine-specific database options not exhaustively simulated |
+| `RDS.Account` | Y | Y | Description/password | Compound identity | Y | Delete account | Compound identity | None | Accepted-create error recovered by account read | Describe | N | — | Persisted redeploy/recovery | — | Password redacted | Subclass + protocol + stack | Partial: PostgreSQL smoke; see LIVE-VALIDATION.md | Engine-specific account policies not exhaustively simulated |
+| `RDS.AccountPrivilege` | Y | Y | Grant/change | Compound identity | P (engine-dependent revoke) | PostgreSQL revoke unsupported | Compound identity | None | N | Describe | N | — | Persisted redeploy | — | — | Subclass + protocol + stack | PostgreSQL grant/read passed; teardown required database cleanup | PostgreSQL ordinary bindings fail deletion explicitly |
+| `RDS.SecurityIpGroup` | Y | Y | Cover | Compound identity | Reset, not empty | Reset to `127.0.0.1` by default | Compound identity | None | N | Describe | N | — | Persisted redeploy | — | — | Subclass + protocol + stack | Partial: PostgreSQL smoke; see LIVE-VALIDATION.md | Destroy cannot remove the last IP |
+| `Tair.Instance` | Y | Y | Spec/SSL/auth/config/protect/tags/password | Y if name/create identity changes | Y | `DeleteInstance` → `Released` (hidden from `DescribeInstances`) → `DestroyInstance` → overview absence | Alchemy tags | Create **`Token`** from Alchemy instance id; spec `ClientToken` from generation + desired-spec hash + operation nonce | `CanNotAcquireLock` and other ambiguous creates recover by name; lock is **not** a generic retry | `DescribeInstances` pages; overview for recycle bin | Creating attributes can omit id/name; list supplies identity | Creating → Normal; Normal can still reject mutations; Released ≠ absent | Unpersisted-create recovery + persisted redeploy | Y | Password redacted; never snapshotted on the wire | Subclass + protocol + stack | Tair smoke: create/lock/Normal/SSL/`IncorrectDBInstanceState`; delete required DestroyInstance; Kvstore hold outlived destroy | Mutation completion is per-operation; backup/restore are outside the modeled lifecycle |
+| `Tair.Account` | Y | Y | Description/password | Compound identity | Y | Delete account | Compound identity | None | N | Describe | N | Available | Persisted redeploy | — | Password redacted | Subclass + protocol + stack | Not connected | Live behavior unverified |
+| `Tair.SecurityIpGroup` | Y | Y | Cover | Compound identity | Y | Delete group | Compound identity | None | N | Describe | N | — | Persisted redeploy | — | — | Subclass + protocol + stack | Not connected | Default-group fallback remains subclass-tested |
+
+## Protocol regression coverage
+
+The remaining resource types now run through real pinned SDK clients against
+loopback HTTP, with Alchemy state persisted between deploy/update/destroy calls:
+
+- `src/protocol/children.test.ts`: RDS and Tair account/password/IP group flows,
+  RDS database and MySQL privilege changes, PostgreSQL `ALL` ownership and
+  unsupported revocation, ACR nested namespace settings/repositories/ACL arrays,
+  HTTP authorization failures, ACR HTTP-200 failure envelopes, accepted-create
+  recovery, and child failures preventing parent teardown.
+- `src/protocol/ack-children.test.ts`: ROA paths and snake_case fields, addon
+  array payloads, node image/tag changes, addon config/version changes, cluster
+  upgrade/protection, delayed and failed tasks, persisted recovery, regional v1
+  inventory and child-before-parent deletion.
+- `src/protocol/instance-updates.test.ts`: RDS resize/serverless observations,
+  private endpoint selection with a public endpoint present, SSL completion and
+  explicit failure, secret rotation without capture,
+  protection cycles, and Tair A→B→A resize tokens/default password rotation.
+- `src/protocol/wire.test.ts`: RDS regional/paginated inventory and distinct
+  tokenless creates, alongside existing identity/token/error serialization checks.
+- `src/protocol/relationships.test.ts`: the ACR PrivateZone request flag in
+  addition to the existing VPC/service attachment and delayed ENI cleanup tests.
+
+RPC routing distinguishes API versions for shared action names. Unknown ROA
+routes fail loudly instead of masquerading as missing resources. Captures omit
+credential values; RPC secrets are replaced before simulator dispatch, and ROA
+bodies are redacted. SDK transport stays under the loopback guard.
+
+These checks cover implemented lifecycle paths, not every generated SDK option,
+real SQL execution, regional availability, or live asynchronous timing. The
+simulator is a regression model, not an Alibaba service emulator. Subclass-only
+edge cases and product-specific live validation remain separate evidence.
 
 ## Account-wide enumeration (`list`) and teardown order
 

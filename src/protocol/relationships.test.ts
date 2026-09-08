@@ -89,7 +89,10 @@ describe("Example relationship protocol coverage", { timeout: 30_000 }, () => {
                   vSwitchId: vswitch.vSwitchId,
                 },
               });
-              return { instanceId: rds.instanceId, vswitchId: vswitch.vSwitchId };
+              return {
+                instanceId: rds.instanceId,
+                vswitchId: vswitch.vSwitchId,
+              };
             }),
           );
           const created = await deployProtocol(options, stack);
@@ -172,6 +175,7 @@ describe("Example relationship protocol coverage", { timeout: 30_000 }, () => {
               instanceId: registry.instanceId,
               vpcId: network.vpcId,
               vswitchId: vswitch.vSwitchId,
+              enablePrivateZoneRecord: true,
             });
             return {
               clusterId: cluster.clusterId,
@@ -184,6 +188,11 @@ describe("Example relationship protocol coverage", { timeout: 30_000 }, () => {
         const created = await deployProtocol(options, stack);
         expect(created.clusterId).toMatch(/^c-test/);
         expect(created.linkStatus).toBe("RUNNING");
+        expect(
+          world.captured.find(
+            (x) => x.action === "CreateInstanceVpcEndpointLinkedVpc",
+          )?.enablePrivateZoneRecord,
+        ).toBe("true");
         await destroyProtocol(options, stack);
         expect(world.ack.size).toBe(0);
         expect(world.acrLinks).toHaveLength(0);

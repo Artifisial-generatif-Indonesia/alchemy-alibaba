@@ -60,7 +60,7 @@ convergence without credentials or cloud spend.
 | `RDS.Instance` | create, describe/list, describe network endpoints, resize, describe/modify SSL, protect, tag/untag, delete | Alchemy tags | create/read private endpoint/resize/SSL/protect/tag/delete | Required |
 | `RDS.Database` | create, describe, modify description, delete | compound identity | create/update/delete | Required |
 | `RDS.Account` | create, describe, modify description, reset password, delete | compound identity | create/update/rotate/delete | Required |
-| `RDS.AccountPrivilege` | describe, grant/change, revoke | compound identity | grant/change/revoke | Required |
+| `RDS.AccountPrivilege` | describe, grant/change, revoke | compound identity | grant/change; PostgreSQL revoke fails explicitly | Partial; see LIVE-VALIDATION.md |
 | `RDS.SecurityIpGroup` | describe, cover/reset | compound identity | create/update/reset | Required |
 | `Tair.Instance` | create, describe/list/overview, resize, rotate the built-in account login value, describe/modify SSL, modify VPC login mode, protect, tag/untag, delete, recycle-bin destroy | Alchemy tags | create/rotate/resize/SSL/VPC-mode/protect/tag/delete/destroy; protocol+stack | Required |
 | `Tair.Account` | create, describe, modify description, reset password, delete | compound identity | create/update/rotate/delete | Required |
@@ -182,3 +182,24 @@ normal reads does not prove its recycle-bin data or backups are gone.
 The [live validation runbook](./LIVE-VALIDATION.md) records the remaining
 approval inputs and acceptance checks. No connected cloud operations were run
 for this audit remediation.
+
+
+## Protocol coverage completion
+
+The [support matrix](SUPPORT-MATRIX.md#protocol-regression-coverage) maps the new
+loopback tests for RDS/Tair children, ACR children, and ACK node pools/addons to
+their lifecycle and failure assertions. Real SDK serialization now exercises
+ACK array bodies and snake_case fields, ACR JSON-encoded nested parameters,
+RDS versus Tair response envelopes, accepted-create recovery, and persisted
+teardown after errors. RDS/Tair instance update tests cover resize tokens,
+serverless settings, SSL/key changes, and deletion protection.
+
+This work found and fixed an additional provider issue: PostgreSQL SSL settings
+can match the request while `LastModifyStatus` is still `setting` or becomes
+`failed`. Reconciliation now waits for `success` when this status is returned,
+and reports failure without copying the service's potentially sensitive reason.
+Engines that omit this PostgreSQL-only status retain their field-based readiness
+checks. The pinned SDK documents these statuses in
+`DescribeDbinstanceSslresponseBody.ts`.
+
+No connected operations are needed for these protocol tests.

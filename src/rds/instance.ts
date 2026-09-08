@@ -736,8 +736,23 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
             yield* waitForPresent({
               service: "RDS",
               operation: "ModifyDBInstanceSSL",
-              read: getSsl(instanceId),
-              ready: (value) => sslMatches(value, news.ssl),
+              read: getSsl(instanceId).pipe(
+                Effect.flatMap((value) =>
+                  value?.lastModifyStatus?.toLowerCase() === "failed"
+                    ? Effect.fail(
+                        new AlibabaInvariantError({
+                          resourceType: Instance.Type,
+                          operation: "ModifyDBInstanceSSL",
+                          message: "RDS SSL configuration failed",
+                        }),
+                      )
+                    : Effect.succeed(value),
+                ),
+              ),
+              ready: (value) =>
+                sslMatches(value, news.ssl) &&
+                (value?.lastModifyStatus === undefined ||
+                  value.lastModifyStatus.toLowerCase() === "success"),
               wait: options.wait,
             });
           }
