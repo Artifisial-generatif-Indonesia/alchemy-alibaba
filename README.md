@@ -2,6 +2,10 @@
 
 Reusable VPC, ACK, ACR, RDS and Tair resources using the official Alibaba SDKs and Effect. This is an independent community provider, not an official Alibaba or Alchemy package.
 
+**Release:** `0.2.0` is prepared for npm's `latest` channel. Read the
+[release notes](CHANGELOG.md) and [validation limits](#validation-limits) before
+adoption. Publishing instructions are in [RELEASE.md](RELEASE.md).
+
 The implementation follows Alchemy's unified lifecycle: read live state,
 adopt only according to each API's ownership capabilities, reconcile from the
 observed resource, and make deletion idempotent. Calls that are safe to repeat
@@ -161,14 +165,17 @@ fixtures. The advertised resource matrix is in
 
 ## Install and compatibility
 
-The initial release is installable directly from GitHub; pin a full commit in
-application lockfiles. It is not yet published to the npm registry. Replace `REVIEWED_COMMIT_SHA`
-below with the commit containing these fixes; the existing `v0.1.0` tag uses
-the older dependency pins. Set the root overrides below before installing.
+The prepared npm release is `0.2.0`. Once it is published to `latest`,
+install the exact version below. Set the root overrides in the next section
+**before installing**, then commit the application's lockfile.
 
 ```sh
-npx --yes npm@11.19.1 install alchemy-alibaba@github:Artifisial-generatif-Indonesia/alchemy-alibaba#REVIEWED_COMMIT_SHA alchemy@2.0.0-beta.76 effect@4.0.0-rc.112
+npx --yes npm@11.19.1 install --save-exact alchemy-alibaba@0.2.0 alchemy@2.0.0-beta.76 effect@4.0.0-rc.112
 ```
+
+Until publication, install the locally prepared tarball or pin a reviewed full
+GitHub commit. The existing `v0.1.0` Git tag predates these fixes and peer pins.
+The `latest` channel may advance; the exact version above makes adoption explicit.
 
 Development and CI use Node 22.22.1 and npm 11.19.1. Node 22.12.0 or newer
 is required by the updated Alchemy browser tooling. Use npm 11.19.1 for both
@@ -210,7 +217,13 @@ See [examples/rds.alchemy.ts](examples/rds.alchemy.ts) for a configurable RDS st
 
 ## Validation limits
 
-Local lifecycle and protocol tests are not proof of a complete live cloud
-lifecycle. RDS and several child resources still require connected validation
-in an isolated account/stage before production adoption. The support matrix
-records these gaps. This extraction does not perform a cloud deployment.
+Local lifecycle and protocol tests do not establish every live cloud behavior.
+The disposable PostgreSQL/VPC/vSwitch run passed provisioning, updates, TLS SQL,
+and final active-resource cleanup, with manual intervention for unsupported
+PostgreSQL ownership revocation. `AccountPrivilege` is not a fully reversible
+PostgreSQL permission manager. RDS permanent recycle-bin removal remains unverified.
+
+ACK/ACR lack complete live lifecycle validation; Tair evidence remains partial.
+Review the [support matrix](SUPPORT-MATRIX.md) and [live evidence](LIVE-VALIDATION.md)
+for the intended configuration before production adoption. Installation performs
+no cloud deployment.

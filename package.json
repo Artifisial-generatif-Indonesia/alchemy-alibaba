@@ -1,6 +1,6 @@
 {
   "name": "alchemy-alibaba",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Effect-native Alibaba Cloud providers for Alchemy v2",
   "type": "module",
   "license": "MIT",
@@ -56,7 +56,9 @@
     "LICENSE",
     "SUPPORT-MATRIX.md",
     "SPEC-COVERAGE.md",
-    "LIVE-VALIDATION.md"
+    "LIVE-VALIDATION.md",
+    "CHANGELOG.md",
+    "RELEASE.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -64,7 +66,9 @@
     "test": "vitest run",
     "check": "npm run typecheck && npm test && npm run build",
     "prepare": "npm run build",
-    "check:security": "npm audit --audit-level=moderate"
+    "check:security": "npm audit --audit-level=moderate",
+    "check:package": "node scripts/prepare-release.mjs",
+    "release:prepare": "npm run check && npm run check:security && npm run check:package"
   },
   "dependencies": {
     "@alicloud/cr20181201": "2.2.3",
@@ -93,5 +97,10 @@
     "@hono/node-server": "1.19.17",
     "valibot": "1.4.2"
   },
-  "packageManager": "npm@11.19.1"
+  "packageManager": "npm@11.19.1",
+  "publishConfig": {
+    "access": "public",
+    "tag": "latest",
+    "registry": "https://registry.npmjs.org/"
+  }
 }

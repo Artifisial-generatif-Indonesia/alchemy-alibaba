@@ -19,4 +19,4 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run check
       - run: npm run check:security
-      - run: npm pack --dry-run
+      - run: npm run check:package

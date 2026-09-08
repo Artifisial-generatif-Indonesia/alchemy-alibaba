@@ -28,9 +28,7 @@ Run on Node 22.22.1 with npm 11.19.1:
 
 ```sh
 npx --yes npm@11.19.1 ci
-npm run check
-npm run check:security
-npm pack --dry-run
+npx --yes npm@11.19.1 run release:prepare
 ```
 
 The example RDS stack uses in-memory state for illustration. Do not run it
@@ -173,3 +171,42 @@ migrations, or guaranteed permanent removal of recycle-bin data/retained backups
 The quoted instance rate was USD 0.0914/hour; subsequent billing is not verified.
 
 Reference: [RevokeAccountPrivilege engine support](https://www.alibabacloud.com/help/en/rds/developer-reference/api-rds-2014-08-15-revokeaccountprivilege).
+
+## 0.2.0 complete live validation plan
+
+Run this after the local release gate passes, against the exact candidate commit.
+“Complete” means the supported lifecycle for each resource below, with optional
+features tested only on an edition/engine that supports them. Record each case
+as passed, failed, API-unsupported, or not run; an unsupported result needs a
+service reference and the observed safe error code. Never count not-run cases
+as passes. The PostgreSQL smoke above is historical evidence, not a rerun of
+this candidate.
+
+| Stage | Resources and checks | Completion evidence |
+| --- | --- | --- |
+| PostgreSQL + VPC | Network/vSwitch, instance, database, account, DBOwner binding, dedicated IP group; unchanged reapply, metadata, password rotation, SSL completion, protection cycle, runner restart, TLS SQL and transaction rollback | Stable IDs, old password rejected, supported updates independently observed; ordinary PostgreSQL binding deletion reports the documented limitation and preserves state |
+| PostgreSQL recovery | Review synthetic ownership/permission cleanup separately, close public access, resume saved-state destroy | Record the intervention explicitly; instance, managed attachments, vSwitch and VPC absent; backups/recycle-bin disposition recorded separately |
+| RDS MySQL | Database/account/privilege/IP group lifecycle; grant, change, revoke, password rotation, supported resize and protection changes | Independent reads prove privilege removal; child-before-parent destroy succeeds without the PostgreSQL workaround |
+| Tair + VPC | Instance/account/IP group; resize A → B → A, password rotation, SSL, VPC authentication, eviction configuration and protection changes | Each mutation converges, restart/reapply preserves IDs, release then recycle-bin destruction observed, vSwitch/VPC dependencies clear |
+| ACK + VPC | Managed cluster/node pool/addon; observable cluster update, node image change, addon config/version change, harmless stage-only drift and recovery | Tasks complete; unchanged deploy produces no mutations; child deletion precedes cluster/network deletion; associated NAT/EIP/ENI/security-group inventory reconciled |
+| ACR retained instance | Read reference; isolated namespace/repository, Internet ACL entry and VPC endpoint link; namespace settings, repository visibility, ACL comment replacement | Nested settings converge; only test children and links removed; paid reference remains unchanged |
+| Optional RDS variants | Serverless capacity/auto-pause and custom SSL certificate/key rotation where supported | Separate approved SKU and certificate setup; otherwise explicitly not run, with no broader coverage claim |
+
+Each stage includes creation, independent readback, an unchanged reapply, supported
+updates, a fresh-process reapply, saved-state destruction, and independent cleanup.
+Keep failure injection in loopback unless a specific live interruption is approved.
+For SQL checks, use synthetic data, hostname-verified TLS, and the existing
+tracked temporary /32 access flow. Record and close access even if a query fails.
+
+Before starting each stage, record its current quote, spending ceiling, time
+limit, private state location, starting inventory, and teardown owner. Stop new
+provisioning when a stage fails or reaches its budget; retain evidence and state
+for recovery. ACR needs an approved existing Enterprise instance; ACK and Tair
+need separate region-supported SKUs. Earlier RDS spending approval does not
+supply those choices. Reconcile any older test leftovers before starting another
+stage in the same network.
+
+After the run, update this evidence and the support matrix with the candidate
+commit, actual outcomes, interventions, residual resources, and billing follow-up.
+A normal `0.2.0` version does not turn an untested optional feature into a verified
+one. Release only the scope the recorded results support.
