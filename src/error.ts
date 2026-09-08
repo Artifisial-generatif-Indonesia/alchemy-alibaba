@@ -2,6 +2,7 @@ import * as Effect from "effect/Effect";
 import * as Duration from "effect/Duration";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
+import * as Predicate from "effect/Predicate";
 
 export const AlibabaService = Schema.Literals([
   "ACK",
@@ -108,8 +109,7 @@ export class AlibabaUnsafeLifecycleTransitionError extends Schema.TaggedError<Al
   },
 ) {}
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null;
+const isRecord = Predicate.isObject;
 
 const stringField = (
   value: Record<string, unknown>,
@@ -145,12 +145,26 @@ export const fromSdkError = (
   // Darabonba's ResponseError.retryAfter and x-acs-retry-after are expressed
   // in milliseconds. This is also the unit consumed by its retry policy.
   const retryAfterMs = numberField(record, "retryAfter");
-  const message = messageOf(cause);
+  // Preserve transport classification without retaining arbitrary SDK text:
+  // SDK/credential error messages can embed request payloads and secrets.
+  const transport =
+    /ConnectTimeout|ReadTimeout|ResponseTimeout|RequestTimeout|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|temporary failure in name resolution|lookup .*i\/o timeout/i.test(
+      messageOf(cause),
+    );
+  const candidateCode =
+    stringField(record, "code") ??
+    (transport ? "RequestTimeout" : stringField(record, "name"));
+  const code =
+    candidateCode !== undefined &&
+    /^[A-Za-z][A-Za-z0-9_.-]{0,127}$/.test(candidateCode)
+      ? candidateCode
+      : undefined;
+  const message = `${service} ${operation} failed${code === undefined ? "" : ` (${code})`}`;
   return new AlibabaProviderError({
     service,
     operation,
     message,
-    code: stringField(record, "code") ?? stringField(record, "name"),
+    code,
     statusCode: numberField(record, "statusCode"),
     requestId:
       stringField(record, "requestId") ?? stringField(record, "request_id"),
@@ -215,12 +229,48 @@ export const isRetryableObservation = (error: unknown): boolean =>
   error instanceof AlibabaProviderError &&
   (isTransient(error) || error.code === "SafeRetryBudgetExceeded");
 
+const absentResourceCodes: Record<AlibabaService, ReadonlySet<string>> = {
+  VPC: new Set([
+    "InvalidVpcId.NotFound",
+    "InvalidVSwitchId.NotFound",
+    "InvalidVswitchId.NotFound",
+  ]),
+  RDS: new Set([
+    "InvalidDBInstanceId.NotFound",
+    "InvalidDBName.NotFound",
+    "InvalidAccountName.NotFound",
+    "InvalidAccount.NotFound",
+    "InvalidDB.NotFound",
+  ]),
+  Tair: new Set([
+    "InvalidInstanceId.NotFound",
+    "InvalidAccountName.NotFound",
+    "InvalidAccount.NotFound",
+    "InvalidSecurityIpGroup.NotFound",
+  ]),
+  ACK: new Set([
+    "NotFound",
+    "Cluster.NotFound",
+    "ErrorClusterNotFound",
+    "NodePool.NotFound",
+    "Nodepool.NotFound",
+    "Addon.NotFound",
+    "Task.NotFound",
+  ]),
+  ACR: new Set([
+    "INSTANCE_NOT_EXIST",
+    "NAMESPACE_NOT_EXIST",
+    "REPO_NOT_EXIST",
+    "REPOSITORY_NOT_EXIST",
+    "ENDPOINT_NOT_EXIST",
+    "VPC_NOT_EXIST",
+  ]),
+};
+
+/** Only an explicit missing cloud-resource code proves absence. */
 export const isNotFound = (error: AlibabaProviderError): boolean =>
-  error.statusCode === 404 ||
-  error.code === "NotFound" ||
-  error.code?.endsWith(".NotFound") === true ||
-  (error.code !== undefined && /not.?found|not.?exist/i.test(error.code)) ||
-  /not found|does not exist/i.test(error.message);
+  error.code !== undefined &&
+  absentResourceCodes[error.service].has(error.code);
 
 /** Create was rejected at the HTTP layer but may still have been accepted. */
 export const isAmbiguousCreate = (error: AlibabaProviderError): boolean =>

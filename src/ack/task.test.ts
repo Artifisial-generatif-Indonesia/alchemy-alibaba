@@ -65,7 +65,7 @@ describe("ACK asynchronous tasks", () => {
     ).rejects.toMatchObject({
       _tag: "AlibabaInvariantError",
       operation: "CreateCluster",
-      message: "T-failed (InvalidCIDR): pod CIDR overlaps the VPC",
+      message: "T-failed (InvalidCIDR): ACK asynchronous task failed",
     });
     expect(client.reads).toBe(1);
   });

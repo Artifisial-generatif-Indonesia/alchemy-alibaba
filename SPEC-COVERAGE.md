@@ -69,10 +69,12 @@ convergence without credentials or cloud spend.
 ## Shared lifecycle guarantees
 
 - Safe reads and mutations use typed Alibaba errors. Error serialization keeps
-  request objects and credentials out of state and logs.
+  request objects and credentials out of state and logs. Arbitrary SDK and task
+  messages are discarded because they can echo secrets; service, operation,
+  validated error code, HTTP status, and request ID remain available.
 - Safe retries are bounded, exponentially backed off, jittered, and honor the
   Darabonba `retryAfter` millisecond value. The whole safe-retry sequence has a
-  45-second wall-clock budget so slow DNS resolution cannot bypass the SDK's
+  60-second wall-clock budget so slow DNS resolution cannot bypass the SDK's
   socket timeouts. Idempotent ACR deletes use the same retry policy.
 - Every generated SDK client has explicit 5-second connect and 10-second read
   timeouts; RDS uses its documented 20-second create-safe read timeout.
@@ -97,12 +99,16 @@ convergence without credentials or cloud spend.
   and waits for permanent absence before vSwitch deletion.
 - Creates that do not expose a provider idempotency token are not blindly
   retried. Reconciliation first observes the stable cloud identity.
-- Create, update, and delete paths poll boundedly until the requested state is
-  observed. A timeout is a typed invariant failure, not a claimed success.
+- Create, update, and delete paths poll boundedly for their modeled readiness
+  and convergence fields. SDK input availability does not imply that every
+  optional field has an observable drift check. A timeout is a typed failure,
+  not a claimed success.
 - ACK operations that return a `task_id` also poll `DescribeTaskInfo`; a
-  control-plane task failure surfaces its code and safe message immediately
+  control-plane task failure surfaces its code and a generic message immediately
   instead of degrading into a generic resource-readiness timeout.
-- Defaulted identity fields are normalized before replacement decisions.
+- Known identity defaults are normalized before replacement decisions: RDS
+  account type `Normal`, Tair account privilege `RoleReadWrite`, and default
+  RDS/Tair whitelist group names. Other optional SDK defaults are not inferred.
 - A discovered compound-identity resource with incompatible immutable settings
   fails explicitly instead of being silently reported as reconciled.
 - Passwords and private SSL material use `Redacted.Redacted<string>` and never
@@ -120,3 +126,59 @@ Before production adoption, validate create, no-op reapply, supported updates,
 and complete deletion in an explicitly approved isolated stage. Independently
 verify that no disposable resources remain. Local tests do not establish
 regional availability or full live lifecycle correctness.
+
+## Reliability audit fixes
+
+The local regression suite in `src/reliability.test.ts` and the compile-time
+checks in `src/internal/model-input.test.ts` cover the audited failures:
+
+- RDS purchases are restricted to one instance. Invalid batch requests fail
+  before SDK calls; historical batch state also blocks deletion until its
+  complete inventory is reconciled separately.
+- Absence classification uses explicit resource-not-found codes per service.
+  Generic HTTP 404s, credential errors, and missing-parameter errors propagate
+  instead of reporting successful cleanup.
+- RDS, VPC, and vSwitch name recovery is region-scoped and paginated. ACK,
+  RDS, and Tair reject conflicting request or persisted regions.
+- RDS observes serverless capacity and auto-pause, waits for resize convergence
+  before SSL changes, and applies certificate and redacted key/password
+  rotations. Secret inputs without SSL settings fail explicitly.
+- New generated RDS/Tair account names use letters and digits. RDS names fit
+  the conservative 16-character engine limit. Explicit and persisted names
+  remain authoritative and are never silently renamed.
+- SDK model index signatures are removed from request inputs while genuine
+  dictionaries remain typed. Excluded raw secret fields cannot bypass the
+  public input types through the SDK's inherited `any` index signature.
+- RDS protection setters omit optional replay tokens. Tair resizes use a fresh
+  token per reconciliation operation and reuse it for retries of that operation,
+  so returning to a previous size does not replay an old purchase response.
+  Explicit caller tokens remain caller-managed. Tokens are not persisted
+  across a process restart; recovery observes current readiness/spec first.
+- A pending vSwitch is no longer mistaken for an accepted deletion.
+- ACR namespace configuration compares requested data fields without SDK
+  prototypes. Omitted configuration fields remain unmanaged.
+- ACK cluster and node-pool drift checks compare requested fields represented
+  in their SDK read models, including cluster spec and node image. Fields not
+  exposed by those read models cannot be continuously verified. Addon JSON
+  configuration ignores object-key order and whitespace; omitted config is
+  unmanaged.
+
+Dependency remediation pins Alchemy `2.0.0-beta.76` while keeping Effect
+`4.0.0-rc.112`. Alchemy supplies the patched browser and image dependencies;
+root overrides pin Lodash `4.18.1`, Hono `4.13.7`, `@hono/node-server` `1.19.17`,
+and Valibot `1.4.2`. The locked graph reports zero npm advisories at validation
+time. CI checks advisories at moderate severity or above. Consumers must add
+the overrides in their own root manifest; library overrides are not inherited.
+
+RDS recycle-bin destruction remains intentionally unmodeled. The official
+[DestroyDBInstance operation documentation](https://www.alibabacloud.com/help/en/rds/developer-reference/api-rds-2014-08-15-destroydbinstance)
+marks it as phased out, although the API overview still lists it. The pinned
+SDK repeats that warning. Adding it to teardown would change retention
+semantics without a dependable observation contract for permanent absence.
+The existing `DeleteDBInstance` release behavior and caller-selected backup
+retention settings remain unchanged. A released instance disappearing from
+normal reads does not prove its recycle-bin data or backups are gone.
+
+The [live validation runbook](./LIVE-VALIDATION.md) records the remaining
+approval inputs and acceptance checks. No connected cloud operations were run
+for this audit remediation.

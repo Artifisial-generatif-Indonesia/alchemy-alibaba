@@ -3,7 +3,6 @@ import { isResolved } from "alchemy/Diff";
 import * as Provider from "alchemy/Provider";
 import { Resource } from "alchemy/Resource";
 import * as Effect from "effect/Effect";
-import { isDeepStrictEqual } from "node:util";
 import { AlibabaClients } from "../clients.ts";
 import { acrSdkCall, isNotFound, retryingAcrSdkCall } from "../error.ts";
 import {
@@ -13,6 +12,7 @@ import {
   type WaitOptions,
 } from "../internal/lifecycle.ts";
 import type { Without } from "../internal/model-input.ts";
+import { modelMatches } from "../internal/observation.ts";
 import type { Providers } from "../providers.ts";
 
 export type NamespaceSettings = Without<
@@ -70,11 +70,10 @@ const settingsMatch = (
     body.autoCreateRepo === settings.autoCreateRepo) &&
   (settings.defaultRepoType === undefined ||
     body.defaultRepoType === settings.defaultRepoType) &&
-  (settings.defaultRepoConfiguration === undefined ||
-    isDeepStrictEqual(
-      body.defaultRepoConfiguration,
-      settings.defaultRepoConfiguration,
-    ));
+  modelMatches(
+    body.defaultRepoConfiguration,
+    settings.defaultRepoConfiguration,
+  );
 
 export interface NamespaceProviderOptions {
   readonly wait?: WaitOptions;

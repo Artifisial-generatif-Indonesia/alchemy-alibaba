@@ -13,7 +13,7 @@ import {
   sdkCall,
 } from "../error.ts";
 import {
-  physicalName,
+  accountName,
   waitForAbsent,
   waitForPresent,
   type WaitOptions,
@@ -128,7 +128,8 @@ export const AccountProvider = (options: AccountProviderOptions = {}) =>
           }
           return olds.instanceId !== news.instanceId ||
             olds.name !== news.name ||
-            olds.settings?.accountType !== news.settings?.accountType ||
+            (olds.settings?.accountType ?? "Normal") !==
+              (news.settings?.accountType ?? "Normal") ||
             olds.settings?.checkPolicy !== news.settings?.checkPolicy
             ? ({ action: "replace" } as const)
             : undefined;
@@ -136,14 +137,14 @@ export const AccountProvider = (options: AccountProviderOptions = {}) =>
         read: Effect.fn(function* ({ id, olds, output }) {
           const instanceId = olds.instanceId ?? output?.instanceId;
           if (instanceId === undefined) return undefined;
-          const name = yield* physicalName(id, olds.name ?? output?.name, 63);
+          const name = yield* accountName(id, olds.name ?? output?.name, 16);
           const account = yield* get(instanceId, name);
           return account === undefined
             ? undefined
             : toAttributes(instanceId, name, account);
         }),
         reconcile: Effect.fn(function* ({ id, news, olds, output }) {
-          const name = yield* physicalName(id, news.name ?? output?.name, 63);
+          const name = yield* accountName(id, news.name ?? output?.name, 16);
           let account = yield* get(news.instanceId, name);
           if (account === undefined) {
             yield* sdkCall("RDS", "CreateAccount", () =>
@@ -184,7 +185,10 @@ export const AccountProvider = (options: AccountProviderOptions = {}) =>
                 ),
               );
             }
-            if (olds === undefined || !Equal.equals(olds.password, news.password)) {
+            if (
+              olds === undefined ||
+              !Equal.equals(olds.password, news.password)
+            ) {
               yield* sdkCall("RDS", "ResetAccountPassword", () =>
                 clients.rds.resetAccountPassword(
                   new RDS.ResetAccountPasswordRequest({

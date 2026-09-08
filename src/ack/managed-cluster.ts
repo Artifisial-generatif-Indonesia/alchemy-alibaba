@@ -18,6 +18,7 @@ import {
   paginate,
   physicalName,
   requireValue,
+  requireRegion,
   requestOrContinueDelete,
   tagsEqual,
   userTags,
@@ -29,6 +30,7 @@ import {
 import type { ModelInput, Without } from "../internal/model-input.ts";
 import type { Providers } from "../providers.ts";
 import { waitForTask } from "./task.ts";
+import { modelMatches } from "../internal/observation.ts";
 
 type ManagedClusterCreateRequest = Without<
   ACK.CreateClusterRequest,
@@ -62,6 +64,7 @@ type ManagedClusterNetwork =
 
 export type ManagedClusterCreate = ManagedClusterCreateRequest &
   ManagedClusterNetwork & {
+    readonly regionId?: string;
     /** The ACK CreateCluster contract for a managed cluster. */
     readonly clusterType: "ManagedKubernetes";
     readonly profile: "Default";
@@ -140,7 +143,10 @@ const tagList = (tags: Readonly<Record<string, string>>) =>
 
 const toAttributes = (
   cluster: ACK.DescribeClusterDetailResponseBody,
-): Effect.Effect<ManagedClusterAttributes, import("../error.ts").AlibabaInvariantError> =>
+): Effect.Effect<
+  ManagedClusterAttributes,
+  import("../error.ts").AlibabaInvariantError
+> =>
   Effect.gen(function* () {
     const clusterId = yield* requireValue(
       cluster.clusterId,
@@ -167,7 +173,8 @@ const toAttributes = (
       regionId: cluster.regionId,
       zoneId: cluster.zoneId,
       vpcId: cluster.vpcId,
-      vswitchIds: cluster.vswitchIds ?? (cluster.vswitchId ? [cluster.vswitchId] : []),
+      vswitchIds:
+        cluster.vswitchIds ?? (cluster.vswitchId ? [cluster.vswitchId] : []),
       serviceCidr: cluster.serviceCidr,
       containerCidr: cluster.containerCidr,
       securityGroupId: cluster.securityGroupId,
@@ -197,8 +204,19 @@ const modifyMatches = (
   cluster: ACK.DescribeClusterDetailResponseBody,
   desired: ModelInput<ACK.ModifyClusterRequest> | undefined,
 ): boolean =>
-  desired?.deletionProtection === undefined ||
-  cluster.deletionProtection === desired.deletionProtection;
+  desired === undefined ||
+  modelMatches(
+    cluster,
+    {
+      ...desired,
+      name: desired.clusterName,
+      rrsaConfig:
+        desired.enableRrsa === undefined
+          ? undefined
+          : { enabled: desired.enableRrsa },
+    },
+    ACK.DescribeClusterDetailResponseBody,
+  );
 
 export interface ManagedClusterProviderOptions {
   readonly wait?: WaitOptions;
@@ -273,19 +291,20 @@ export const ManagedClusterProvider = (
               clusters.find((cluster) => cluster.name === name)?.clusterId,
           ),
           Effect.flatMap((clusterId) =>
-            clusterId === undefined ? Effect.succeed(undefined) : getById(clusterId),
+            clusterId === undefined
+              ? Effect.succeed(undefined)
+              : getById(clusterId),
           ),
         );
 
-      const observe = (
-        clusterId: string | undefined,
-        name: string,
-      ) =>
+      const observe = (clusterId: string | undefined, name: string) =>
         clusterId === undefined
           ? findByName(name)
           : getById(clusterId).pipe(
               Effect.flatMap((cluster) =>
-                cluster === undefined ? findByName(name) : Effect.succeed(cluster),
+                cluster === undefined
+                  ? findByName(name)
+                  : Effect.succeed(cluster),
               ),
             );
 
@@ -297,9 +316,13 @@ export const ManagedClusterProvider = (
       ) {
         if (tagsEqual(observed, desired)) return;
         const upsert = Object.fromEntries(
-          Object.entries(desired).filter(([key, value]) => observed[key] !== value),
+          Object.entries(desired).filter(
+            ([key, value]) => observed[key] !== value,
+          ),
         );
-        const removed = Object.keys(observed).filter((key) => !(key in desired));
+        const removed = Object.keys(observed).filter(
+          (key) => !(key in desired),
+        );
         if (Object.keys(upsert).length > 0) {
           yield* retryingSdkCall("ACK", "TagResources", () =>
             clients.ack.tagResources(
@@ -350,7 +373,9 @@ export const ManagedClusterProvider = (
                 (cluster) =>
                   cluster === undefined
                     ? Effect.succeed([])
-                    : toAttributes(cluster).pipe(Effect.map((value) => [value])),
+                    : toAttributes(cluster).pipe(
+                        Effect.map((value) => [value]),
+                      ),
                 { concurrency: 4 },
               ),
             ),
@@ -384,6 +409,16 @@ export const ManagedClusterProvider = (
         }),
 
         read: Effect.fn(function* ({ id, olds, output }) {
+          yield* requireRegion(
+            ManagedCluster.Type,
+            clients.regionId,
+            olds.create?.regionId,
+          );
+          yield* requireRegion(
+            ManagedCluster.Type,
+            clients.regionId,
+            output?.regionId,
+          );
           const name = yield* physicalName(id, olds.name ?? output?.name, 63);
           const cluster = yield* observe(output?.clusterId, name);
           if (cluster === undefined) return undefined;
@@ -394,7 +429,19 @@ export const ManagedClusterProvider = (
         }),
 
         reconcile: Effect.fn(function* ({ id, news, olds, output }) {
-          const addonNames = new Set(news.create.addons.map((addon) => addon.name));
+          yield* requireRegion(
+            ManagedCluster.Type,
+            clients.regionId,
+            news.create.regionId,
+          );
+          yield* requireRegion(
+            ManagedCluster.Type,
+            clients.regionId,
+            output?.regionId,
+          );
+          const addonNames = new Set(
+            news.create.addons.map((addon) => addon.name),
+          );
           const requestedTerway = news.create.podVswitchIds !== undefined;
           if (requestedTerway && !addonNames.has("terway-eniip")) {
             return yield* new AlibabaInvariantError({
@@ -410,11 +457,7 @@ export const ManagedClusterProvider = (
               message: "Flannel networking requires the flannel addon",
             });
           }
-          const name = yield* physicalName(
-            id,
-            news.name ?? output?.name,
-            63,
-          );
+          const name = yield* physicalName(id, news.name ?? output?.name, 63);
           const tags = yield* desiredTags(id, news.tags);
           let cluster = yield* observe(output?.clusterId, name);
 
@@ -507,6 +550,16 @@ export const ManagedClusterProvider = (
         }),
 
         delete: Effect.fn(function* ({ output, olds }) {
+          yield* requireRegion(
+            ManagedCluster.Type,
+            clients.regionId,
+            olds.create?.regionId,
+          );
+          yield* requireRegion(
+            ManagedCluster.Type,
+            clients.regionId,
+            output.regionId,
+          );
           let cluster = yield* getById(output.clusterId);
           if (cluster === undefined) return;
           if (!deleting(cluster) && cluster.deletionProtection) {

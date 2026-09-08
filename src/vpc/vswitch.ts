@@ -96,7 +96,7 @@ const ready = (vswitch: ObservedVSwitch) =>
 
 const deleting = (vswitch: ObservedVSwitch) => {
   const status = vswitch.status?.toLowerCase();
-  return status === "deleting" || status === "pending";
+  return status === "deleting";
 };
 
 const transientDeleteCodes = new Set([
@@ -217,29 +217,41 @@ export const VSwitchProvider = (options: VSwitchProviderOptions = {}) =>
         );
 
       const findByName = (vpcId: string, name: string) =>
-        retryingSdkCall("VPC", "DescribeVSwitches", () =>
-          clients.vpc.describeVSwitches(
-            new VPC.DescribeVSwitchesRequest({
-              regionId: clients.regionId,
-              vpcId,
-              vSwitchName: name,
-              pageNumber: 1,
-              pageSize: 50,
-            }),
-          ),
-        ).pipe(
+        paginate({
+          service: "VPC",
+          operation: "DescribeVSwitches",
+          page: ({ pageNumber, pageSize }) =>
+            retryingSdkCall("VPC", "DescribeVSwitches", () =>
+              clients.vpc.describeVSwitches(
+                new VPC.DescribeVSwitchesRequest({
+                  regionId: clients.regionId,
+                  vpcId,
+                  vSwitchName: name,
+                  pageNumber,
+                  pageSize,
+                }),
+              ),
+            ).pipe(
+              Effect.map((response) => ({
+                items: response.body?.vSwitches?.vSwitch ?? [],
+                totalCount: response.body?.totalCount,
+              })),
+            ),
+        }).pipe(
           Effect.map(
-            (response) =>
-              response.body?.vSwitches?.vSwitch?.find(
-                (item) => item.vSwitchName === name,
-              )?.vSwitchId,
+            (items) =>
+              items.find((item) => item.vSwitchName === name)?.vSwitchId,
           ),
           Effect.flatMap((vSwitchId) =>
             vSwitchId === undefined
               ? Effect.succeed(undefined)
               : getById(vSwitchId),
           ),
-          Effect.catchIf(isNotFound, () => Effect.succeed(undefined)),
+          Effect.catchIf(
+            (error) =>
+              error._tag === "AlibabaProviderError" && isNotFound(error),
+            () => Effect.succeed(undefined),
+          ),
         );
 
       const observe = (
@@ -324,7 +336,8 @@ export const VSwitchProvider = (options: VSwitchProviderOptions = {}) =>
               ).pipe(
                 Effect.map((response) => ({
                   items: (response.body?.vSwitches?.vSwitch ?? []).flatMap(
-                    (item) => (item.vSwitchId === undefined ? [] : [item.vSwitchId]),
+                    (item) =>
+                      item.vSwitchId === undefined ? [] : [item.vSwitchId],
                   ),
                   totalCount: response.body?.totalCount,
                 })),
@@ -345,7 +358,9 @@ export const VSwitchProvider = (options: VSwitchProviderOptions = {}) =>
                 (vswitch) =>
                   vswitch === undefined
                     ? Effect.succeed([])
-                    : toAttributes(vswitch).pipe(Effect.map((value) => [value])),
+                    : toAttributes(vswitch).pipe(
+                        Effect.map((value) => [value]),
+                      ),
                 { concurrency: "unbounded" },
               ),
             ),

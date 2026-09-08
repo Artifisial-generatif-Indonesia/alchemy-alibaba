@@ -73,8 +73,9 @@ chain. The provider itself reads only configuration through Effect:
   remain the responsibility of `@alicloud/credentials`.
 
 The configured region is also the default `regionId` for VPC, ACK, RDS, and
-Tair create requests. An explicit request region remains supported and
-participates in replacement decisions where the resource model exposes it.
+Tair create requests. ACK, RDS, and Tair reject an explicit or persisted region
+that differs from the configured provider region before making API calls.
+Use a separate `AlibabaClients` layer for each region.
 
 For tests or explicit composition, use `providers(clientOptions)` or provide an
 `AlibabaClients` layer to `resourceProviders()`. Credentials are never included
@@ -146,11 +147,13 @@ drives those same clients over HTTP. Protocol tests fail if a request leaves
 loopback. Stack tests persist Alchemy state in a temporary directory.
 
 ```sh
-npm ci
+npx --yes npm@11.19.1 ci
 npm run check
+npm run check:security
 ```
 
-No connected apply/delete test is part of the repository gate. Such a test must
+The [live validation runbook](LIVE-VALIDATION.md) specifies the disposable-stage
+acceptance checks and cleanup evidence. No connected apply/delete test is part of the repository gate. Such a test must
 use an explicitly approved non-production stage and namespaced synthetic
 fixtures. The advertised resource matrix is in
 [SUPPORT-MATRIX.md](./SUPPORT-MATRIX.md).
@@ -159,16 +162,38 @@ fixtures. The advertised resource matrix is in
 ## Install and compatibility
 
 The initial release is installable directly from GitHub; pin a full commit in
-application lockfiles. It is not yet published to the npm registry.
+application lockfiles. It is not yet published to the npm registry. Replace `REVIEWED_COMMIT_SHA`
+below with the commit containing these fixes; the existing `v0.1.0` tag uses
+the older dependency pins. Set the root overrides below before installing.
 
 ```sh
-npx --yes npm@11.19.1 install alchemy-alibaba@github:Artifisial-generatif-Indonesia/alchemy-alibaba#v0.1.0 alchemy@2.0.0-beta.72 effect@4.0.0-rc.112
+npx --yes npm@11.19.1 install alchemy-alibaba@github:Artifisial-generatif-Indonesia/alchemy-alibaba#REVIEWED_COMMIT_SHA alchemy@2.0.0-beta.76 effect@4.0.0-rc.112
 ```
 
-The fresh-project command above was verified with Node 22 and npm 11.19.1,
-an empty cache, and SSH disabled. npm 10.9.8 crashed in its peer-dependency
-resolver (`edgesOut`) for a fresh graph; use npm 11.19.1 for initial resolution.
-Existing locked installs with `npm ci` also pass on npm 10.9.8.
+Development and CI use Node 22.22.1 and npm 11.19.1. Node 22.12.0 or newer
+is required by the updated Alchemy browser tooling. Use npm 11.19.1 for both
+initial resolution and clean installs; npm 10 does not reliably resolve this
+prerelease peer graph.
+
+Alchemy 2.0.0-beta.76 replaces the vulnerable browser extraction and image
+libraries. The remaining upstream pins need these overrides in the **consumer
+application's root** `package.json`, as well as this repository's root:
+
+```json
+{
+  "overrides": {
+    "lodash": "4.18.1",
+    "hono": "4.13.7",
+    "@hono/node-server": "1.19.17",
+    "valibot": "1.4.2"
+  }
+}
+```
+
+Overrides in a library are not inherited by consumers. Set them before
+installing, commit the application's lockfile, and run `npm audit` there too.
+The repository's locked graph reports zero advisories at validation time;
+that result does not cover arbitrary consumer dependency combinations.
 
 Alchemy and Effect are exact peer dependencies because both APIs are prerelease.
 The package ships compiled ESM and declarations; Git installs build them with

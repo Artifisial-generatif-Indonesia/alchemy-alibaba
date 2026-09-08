@@ -111,7 +111,9 @@ export const SecurityIpGroupProvider = (
           if (olds.instanceId === undefined || olds.securityIps === undefined) {
             return undefined;
           }
-          return olds.instanceId !== news.instanceId || olds.name !== news.name
+          return olds.instanceId !== news.instanceId ||
+            (olds.name ?? "Default").toLowerCase() !==
+              (news.name ?? "Default").toLowerCase()
             ? ({ action: "replace" } as const)
             : undefined;
         }),
@@ -131,7 +133,8 @@ export const SecurityIpGroupProvider = (
             return yield* new AlibabaInvariantError({
               resourceType: SecurityIpGroup.Type,
               operation: "ModifySecurityIps",
-              message: "RDS requires at least one address in every security IP group",
+              message:
+                "RDS requires at least one address in every security IP group",
             });
           }
           const group = yield* get(news.instanceId, name);

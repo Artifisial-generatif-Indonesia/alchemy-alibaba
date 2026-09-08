@@ -8,7 +8,7 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
 import * as Redacted from "effect/Redacted";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { AlibabaClients } from "../clients.ts";
 import {
@@ -26,6 +26,7 @@ import {
   paginate,
   physicalName,
   requireValue,
+  requireRegion,
   requestOrContinueDelete,
   tagsEqual,
   userTags,
@@ -150,17 +151,16 @@ const specMatches = (instance: ObservedInstance, spec: InstanceProps["spec"]) =>
 
 /**
  * Alibaba requires a distinct ClientToken for distinct ModifyInstanceSpec
- * requests. Hash both the Alchemy resource generation and the requested spec
- * so retries remain idempotent while a later resize cannot replay an older
- * operation. The fixed prefix plus SHA-256 digest stays below the 64-byte API
- * limit.
+ * requests. Each operation has a fresh nonce; its retries reuse the same token.
+ * Returning to an earlier size must not replay an earlier operation.
  */
 const specClientToken = (
   resourceInstanceId: string,
   spec: InstanceProps["spec"],
+  operationId: string,
 ): string =>
   `spec-${createHash("sha256")
-    .update(JSON.stringify({ resourceInstanceId, spec }))
+    .update(JSON.stringify({ resourceInstanceId, spec, operationId }))
     .digest("hex")
     .slice(0, 56)}`;
 
@@ -304,7 +304,8 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
               })),
               Effect.catchIf(isNotFound, () =>
                 Effect.succeed({
-                  items: [] as Tair.DescribeInstancesResponseBodyInstancesKVStoreInstance[],
+                  items:
+                    [] as Tair.DescribeInstancesResponseBodyInstancesKVStoreInstance[],
                 }),
               ),
             ),
@@ -562,6 +563,16 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
             : undefined;
         }),
         read: Effect.fn(function* ({ id, olds, output }) {
+          yield* requireRegion(
+            Instance.Type,
+            clients.regionId,
+            olds.create?.regionId,
+          );
+          yield* requireRegion(
+            Instance.Type,
+            clients.regionId,
+            output?.regionId,
+          );
           const name = yield* physicalName(id, olds.name ?? output?.name, 80);
           const instance = yield* observe(output?.instanceId, name);
           if (instance === undefined) return undefined;
@@ -577,6 +588,16 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
           olds,
           output,
         }) {
+          yield* requireRegion(
+            Instance.Type,
+            clients.regionId,
+            news.create.regionId,
+          );
+          yield* requireRegion(
+            Instance.Type,
+            clients.regionId,
+            output?.regionId,
+          );
           const name = yield* physicalName(id, news.name ?? output?.name, 80);
           const tags = yield* desiredTags(id, news.tags);
           let instance = yield* observe(output?.instanceId, name);
@@ -699,19 +720,31 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
             );
             yield* waitUntilNormal();
           }
+          instance = yield* waitUntilNormal();
           if (!specMatches(instance, news.spec)) {
+            const token =
+              news.spec?.clientToken ??
+              specClientToken(
+                resourceInstanceId,
+                news.spec,
+                yield* Effect.sync(randomUUID),
+              );
             yield* requestMutation("ModifyInstanceSpec", () =>
               clients.tair.modifyInstanceSpec(
                 new Tair.ModifyInstanceSpecRequest({
                   ...news.spec,
                   instanceId,
-                  clientToken:
-                    news.spec?.clientToken ??
-                    specClientToken(resourceInstanceId, news.spec),
+                  clientToken: token,
                 }),
               ),
             );
-            yield* waitUntilNormal();
+            instance = yield* waitForPresent({
+              service: "Tair",
+              operation: "ModifyInstanceSpec",
+              read: getById(instanceId, name),
+              ready: (value) => ready(value) && specMatches(value, news.spec),
+              wait: options.wait,
+            });
           }
           const observedSsl = yield* getSsl(instanceId).pipe(
             Effect.catchIf(isNotFound, () => Effect.succeed(undefined)),
@@ -801,6 +834,16 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
           return yield* toAttributes(fresh);
         }),
         delete: Effect.fn(function* ({ output, olds }) {
+          yield* requireRegion(
+            Instance.Type,
+            clients.regionId,
+            olds.create?.regionId,
+          );
+          yield* requireRegion(
+            Instance.Type,
+            clients.regionId,
+            output.regionId,
+          );
           const name = output.name;
           const observeForDelete = () =>
             waitFor({

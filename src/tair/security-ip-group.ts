@@ -104,7 +104,8 @@ export const SecurityIpGroupProvider = (
           if (olds.instanceId === undefined || olds.securityIps === undefined) {
             return undefined;
           }
-          return olds.instanceId !== news.instanceId || olds.name !== news.name
+          return olds.instanceId !== news.instanceId ||
+            (olds.name ?? "default") !== (news.name ?? "default")
             ? ({ action: "replace" } as const)
             : undefined;
         }),
@@ -124,7 +125,8 @@ export const SecurityIpGroupProvider = (
             return yield* new AlibabaInvariantError({
               resourceType: SecurityIpGroup.Type,
               operation: "ModifySecurityIps",
-              message: "Tair requires at least one address in a security IP group",
+              message:
+                "Tair requires at least one address in a security IP group",
             });
           }
           const group = yield* get(news.instanceId, name);

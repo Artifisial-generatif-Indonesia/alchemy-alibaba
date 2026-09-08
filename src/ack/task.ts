@@ -25,8 +25,13 @@ export const waitForTask = (options: {
       if (state !== "fail" && state !== "failed" && state !== "error") {
         return Effect.succeed(task);
       }
-      const detail = task?.error?.message ?? "ACK asynchronous task failed";
-      const code = task?.error?.code;
+      // Task messages can contain echoed request data; retain only the code.
+      const detail = "ACK asynchronous task failed";
+      const rawCode = task?.error?.code;
+      const code =
+        rawCode !== undefined && /^[A-Za-z][A-Za-z0-9_.-]{0,127}$/.test(rawCode)
+          ? rawCode
+          : undefined;
       return Effect.fail(
         new AlibabaInvariantError({
           resourceType: "Alibaba.ACK.Task",

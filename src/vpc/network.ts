@@ -193,17 +193,33 @@ export const NetworkProvider = (options: NetworkProviderOptions = {}) =>
             pageNumber: 1,
             pageSize: 50,
           }),
-        ).pipe(Effect.map((items) => items.find((item) => item.vpcId === vpcId)));
+        ).pipe(
+          Effect.map((items) => items.find((item) => item.vpcId === vpcId)),
+        );
 
       const findByName = (name: string) =>
-        describe(
-          new VPC.DescribeVpcsRequest({
-            regionId: clients.regionId,
-            vpcName: name,
-            pageNumber: 1,
-            pageSize: 50,
-          }),
-        ).pipe(Effect.map((items) => items.find((item) => item.vpcName === name)));
+        paginate({
+          service: "VPC",
+          operation: "DescribeVpcs",
+          page: ({ pageNumber, pageSize }) =>
+            retryingSdkCall("VPC", "DescribeVpcs", () =>
+              clients.vpc.describeVpcs(
+                new VPC.DescribeVpcsRequest({
+                  regionId: clients.regionId,
+                  vpcName: name,
+                  pageNumber,
+                  pageSize,
+                }),
+              ),
+            ).pipe(
+              Effect.map((response) => ({
+                items: response.body?.vpcs?.vpc ?? [],
+                totalCount: response.body?.totalCount,
+              })),
+            ),
+        }).pipe(
+          Effect.map((items) => items.find((item) => item.vpcName === name)),
+        );
 
       const observe = (vpcId: string | undefined, name: string) =>
         vpcId === undefined
@@ -223,9 +239,13 @@ export const NetworkProvider = (options: NetworkProviderOptions = {}) =>
       ) {
         if (tagsEqual(observed, desired)) return;
         const upsert = Object.fromEntries(
-          Object.entries(desired).filter(([key, value]) => observed[key] !== value),
+          Object.entries(desired).filter(
+            ([key, value]) => observed[key] !== value,
+          ),
         );
-        const removed = Object.keys(observed).filter((key) => !(key in desired));
+        const removed = Object.keys(observed).filter(
+          (key) => !(key in desired),
+        );
         if (Object.keys(upsert).length > 0) {
           yield* retryingSdkCall("VPC", "TagResources", () =>
             clients.vpc.tagResources(

@@ -4,6 +4,7 @@ import * as Duration from "effect/Duration";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Schedule from "effect/Schedule";
+import { createHash } from "node:crypto";
 import {
   AlibabaInvariantError,
   AlibabaPaginationLimitError,
@@ -31,6 +32,36 @@ export const physicalName = (
   requested === undefined
     ? createPhysicalName({ id, maxLength, lowercase: true })
     : Effect.succeed(requested);
+
+/** Existing names are authoritative; only newly generated accounts use this format. */
+export const accountName = Effect.fn("Alibaba.accountName")(function* (
+  id: string,
+  requested: string | undefined,
+  maxLength: number,
+) {
+  if (requested !== undefined) return requested;
+  const identity = yield* physicalName(id, undefined, 100);
+  return `a${createHash("sha256").update(identity).digest("hex")}`.slice(
+    0,
+    maxLength,
+  );
+});
+
+/** SDK endpoints and inventories are bound to the configured provider region. */
+export const requireRegion = (
+  resourceType: string,
+  configured: string,
+  requested: string | undefined,
+) =>
+  requested === undefined || requested === configured
+    ? Effect.void
+    : Effect.fail(
+        new AlibabaInvariantError({
+          resourceType,
+          operation: "ValidateRegion",
+          message: `Configure an AlibabaClients layer for region ${requested} before managing this resource`,
+        }),
+      );
 
 export const desiredTags = Effect.fn(function* (
   id: string,
@@ -158,11 +189,7 @@ export const paginate = <Item, Error, Requirements>(options: {
     Error,
     Requirements
   >;
-}): Effect.Effect<
-  Item[],
-  Error | AlibabaPaginationLimitError,
-  Requirements
-> =>
+}): Effect.Effect<Item[], Error | AlibabaPaginationLimitError, Requirements> =>
   Effect.gen(function* () {
     const pageSize = options.pageSize ?? 50;
     const maxPages = options.maxPages ?? 200;

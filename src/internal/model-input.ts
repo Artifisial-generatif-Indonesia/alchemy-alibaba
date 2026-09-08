@@ -1,5 +1,19 @@
 type FunctionMember = (...args: never[]) => unknown;
 
+type DataKey<T, Key extends keyof T> = T extends { validate(): void }
+  ? string extends Key
+    ? never
+    : number extends Key
+      ? never
+      : symbol extends Key
+        ? never
+        : T[Key] extends FunctionMember
+          ? never
+          : Key
+  : T[Key] extends FunctionMember
+    ? never
+    : Key;
+
 /**
  * Converts a generated Alibaba SDK model class into the plain object accepted
  * by its constructor. Method members inherited from the Darabonba base model
@@ -13,9 +27,7 @@ export type ModelInput<T> = T extends FunctionMember
       ? ModelInput<Item>[]
       : T extends object
         ? {
-            [Key in keyof T as T[Key] extends FunctionMember
-              ? never
-              : Key]: ModelInput<T[Key]>;
+            [Key in keyof T as DataKey<T, Key>]: ModelInput<T[Key]>;
           }
         : T;
 

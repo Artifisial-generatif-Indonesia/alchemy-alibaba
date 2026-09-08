@@ -6,11 +6,13 @@ import { Resource } from "alchemy/Resource";
 import { hasAlchemyTags } from "alchemy/Tags";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
+import * as Equal from "effect/Equal";
 import * as Redacted from "effect/Redacted";
 import { isDeepStrictEqual } from "node:util";
 import { AlibabaClients } from "../clients.ts";
 import {
   AlibabaWaitTimeoutError,
+  AlibabaInvariantError,
   type AlibabaProviderError,
   isAmbiguousCreate,
   isNotFound,
@@ -24,6 +26,7 @@ import {
   paginate,
   physicalName,
   requireValue,
+  requireRegion,
   tagsEqual,
   userTags,
   waitFor,
@@ -48,7 +51,10 @@ export type RDSInstanceCreate = Omit<
   | "engineVersion"
   | "payType"
   | "securityIPList"
+  | "amount"
 > & {
+  /** One Alchemy resource owns exactly one database instance. */
+  readonly amount?: 1;
   /** Required by CreateDBInstance. */
   readonly DBInstanceClass: string;
   /** Alibaba currently requires the fixed Intranet value. */
@@ -144,6 +150,7 @@ const sslEnabledMatches = (
   desired: number | undefined,
 ) => {
   if (desired === undefined) return true;
+  if (observed === undefined) return false;
   const enabled = ["1", "on", "yes", "enable", "enabled", "true"].includes(
     observed?.toLowerCase() ?? "",
   );
@@ -157,7 +164,31 @@ const sslMatches = (ssl: ObservedSsl, desired: InstanceProps["ssl"]) =>
       desired.connectionString === ssl?.connectionString) &&
     (desired.CAType === undefined || desired.CAType === ssl?.CAType) &&
     (desired.tlsVersion === undefined ||
-      desired.tlsVersion === ssl?.tlsVersion));
+      desired.tlsVersion === ssl?.tlsVersion) &&
+    (
+      [
+        "ACL",
+        "replicationACL",
+        "forceEncryption",
+        "clientCACert",
+        "clientCertRevocationList",
+        "serverCert",
+      ] as const
+    ).every(
+      (key) => desired[key] === undefined || desired[key] === ssl?.[key],
+    ));
+
+const requireSingleInstance = (amount: number | undefined) =>
+  amount === undefined || amount === 1
+    ? Effect.void
+    : Effect.fail(
+        new AlibabaInvariantError({
+          resourceType: Instance.Type,
+          operation: "CreateDBInstance",
+          message:
+            "One RDS resource must create exactly one instance (amount must be 1); reconcile any previous batch purchases separately",
+        }),
+      );
 
 const specMatches = (instance: ObservedInstance, spec: InstanceProps["spec"]) =>
   spec === undefined ||
@@ -169,7 +200,16 @@ const specMatches = (instance: ObservedInstance, spec: InstanceProps["spec"]) =>
       spec.DBInstanceStorageType === instance.DBInstanceStorageType) &&
     (spec.engineVersion === undefined ||
       spec.engineVersion === instance.engineVersion) &&
-    (spec.category === undefined || spec.category === instance.category));
+    (spec.category === undefined || spec.category === instance.category) &&
+    (spec.serverlessConfiguration?.minCapacity === undefined ||
+      spec.serverlessConfiguration.minCapacity ===
+        instance.serverlessConfig?.scaleMin) &&
+    (spec.serverlessConfiguration?.maxCapacity === undefined ||
+      spec.serverlessConfiguration.maxCapacity ===
+        instance.serverlessConfig?.scaleMax) &&
+    (spec.serverlessConfiguration?.autoPause === undefined ||
+      spec.serverlessConfiguration.autoPause ===
+        instance.serverlessConfig?.autoPause));
 
 export interface InstanceProviderOptions {
   readonly wait?: WaitOptions;
@@ -204,18 +244,29 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
         );
 
       const findByName = (name: string) =>
-        retryingSdkCall("RDS", "DescribeDBInstances", () =>
-          clients.rds.describeDBInstances(
-            new RDS.DescribeDBInstancesRequest({
-              searchKey: name,
-              pageNumber: 1,
-              pageSize: 100,
-            }),
-          ),
-        ).pipe(
+        paginate({
+          service: "RDS",
+          operation: "DescribeDBInstances",
+          page: ({ pageNumber, pageSize }) =>
+            retryingSdkCall("RDS", "DescribeDBInstances", () =>
+              clients.rds.describeDBInstances(
+                new RDS.DescribeDBInstancesRequest({
+                  regionId: clients.regionId,
+                  searchKey: name,
+                  pageNumber,
+                  pageSize,
+                }),
+              ),
+            ).pipe(
+              Effect.map((response) => ({
+                items: response.body?.items?.DBInstance ?? [],
+                totalCount: response.body?.totalRecordCount,
+              })),
+            ),
+        }).pipe(
           Effect.map(
-            (response) =>
-              response.body?.items?.DBInstance?.find(
+            (instances) =>
+              instances.find(
                 (instance) => instance.DBInstanceDescription === name,
               )?.DBInstanceId,
           ),
@@ -414,7 +465,9 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
                 Effect.map((response) => ({
                   items: (response.body?.items?.DBInstance ?? []).flatMap(
                     (item) =>
-                      item.DBInstanceId === undefined ? [] : [item.DBInstanceId],
+                      item.DBInstanceId === undefined
+                        ? []
+                        : [item.DBInstanceId],
                   ),
                   totalCount: response.body?.totalRecordCount,
                 })),
@@ -463,6 +516,17 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
             : undefined;
         }),
         read: Effect.fn(function* ({ id, olds, output }) {
+          yield* requireSingleInstance(olds.create?.amount);
+          yield* requireRegion(
+            Instance.Type,
+            clients.regionId,
+            olds.create?.regionId,
+          );
+          yield* requireRegion(
+            Instance.Type,
+            clients.regionId,
+            output?.regionId,
+          );
           const name = yield* physicalName(id, olds.name ?? output?.name, 64);
           const instance = yield* observe(output?.instanceId, name);
           if (instance === undefined) return undefined;
@@ -482,8 +546,32 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
           id,
           instanceId: resourceInstanceId,
           news,
+          olds,
           output,
         }) {
+          yield* requireRegion(
+            Instance.Type,
+            clients.regionId,
+            news.create.regionId,
+          );
+          yield* requireRegion(
+            Instance.Type,
+            clients.regionId,
+            output?.regionId,
+          );
+          yield* requireSingleInstance(news.create.amount);
+          yield* requireSingleInstance(olds?.create?.amount);
+          if (
+            news.ssl === undefined &&
+            (news.sslPassword !== undefined || news.sslServerKey !== undefined)
+          ) {
+            return yield* new AlibabaInvariantError({
+              resourceType: Instance.Type,
+              operation: "ModifyDBInstanceSSL",
+              message:
+                "SSL settings are required when supplying an SSL password or server key",
+            });
+          }
           const name = yield* physicalName(id, news.name ?? output?.name, 64);
           const tags = yield* desiredTags(id, news.tags);
           let instance = yield* observe(output?.instanceId, name);
@@ -530,7 +618,15 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
             const createdInstanceId =
               creation._tag === "Observed"
                 ? creation.instance.DBInstanceId
-                : creation.response.body?.DBInstanceId?.split(",")[0];
+                : creation.response.body?.DBInstanceId;
+            if (createdInstanceId?.includes(",")) {
+              return yield* new AlibabaInvariantError({
+                resourceType: Instance.Type,
+                operation: "CreateDBInstance",
+                message:
+                  "RDS returned multiple instance IDs for a single-instance request; reconcile the cloud inventory before retrying",
+              });
+            }
             instance = yield* waitForPresent({
               service: "RDS",
               operation: "CreateDBInstance",
@@ -545,6 +641,13 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
             "Reconcile",
             "RDS returned an instance without DBInstanceId",
           );
+          instance = yield* waitForPresent({
+            service: "RDS",
+            operation: "WaitDBInstanceReady",
+            read: getById(instanceId),
+            ready,
+            wait: options.wait,
+          });
           if (instance.DBInstanceDescription !== name) {
             yield* sdkCall("RDS", "ModifyDBInstanceDescription", () =>
               clients.rds.modifyDBInstanceDescription(
@@ -562,16 +665,22 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
                 new RDS.ModifyDBInstanceDeletionProtectionRequest({
                   DBInstanceId: instanceId,
                   deletionProtection,
-                  // Scope the token to the resource generation AND the
-                  // requested value. A token derived from the logical id alone
-                  // is reused across every reconcile, so flipping protection
-                  // back can match Alibaba's cached result for the earlier
-                  // call and silently not apply.
-                  clientToken: `protect-${resourceInstanceId}-${deletionProtection}`,
+                  // This is an idempotent setter. Omitting the optional token
+                  // avoids replaying a previous true/false cycle.
                 }),
               ),
             );
+            instance = yield* waitForPresent({
+              service: "RDS",
+              operation: "ModifyDBInstanceDeletionProtection",
+              read: getById(instanceId),
+              ready: (value) =>
+                ready(value) && value.deletionProtection === deletionProtection,
+              wait: options.wait,
+            });
           }
+          // A previous attempt may have completed the purchase before state
+          // was persisted. Observed convergence must prevent a second resize.
           if (!specMatches(instance, news.spec)) {
             yield* sdkCall("RDS", "ModifyDBInstanceSpec", () =>
               clients.rds.modifyDBInstanceSpec(
@@ -581,9 +690,22 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
                 }),
               ),
             );
+            instance = yield* waitForPresent({
+              service: "RDS",
+              operation: "ModifyDBInstanceSpec",
+              read: getById(instanceId),
+              ready: (value) => ready(value) && specMatches(value, news.spec),
+              wait: options.wait,
+            });
           }
           const observedSsl = yield* getSsl(instanceId);
-          if (!sslMatches(observedSsl, news.ssl)) {
+          if (
+            !sslMatches(observedSsl, news.ssl) ||
+            (news.ssl !== undefined &&
+              (!isDeepStrictEqual(olds?.ssl, news.ssl) ||
+                !Equal.equals(olds?.sslPassword, news.sslPassword) ||
+                !Equal.equals(olds?.sslServerKey, news.sslServerKey)))
+          ) {
             const connectionString =
               news.ssl?.connectionString ??
               (yield* requireValue(
@@ -650,6 +772,17 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
           return yield* toAttributes(fresh);
         }),
         delete: Effect.fn(function* ({ output, olds }) {
+          yield* requireSingleInstance(olds.create?.amount);
+          yield* requireRegion(
+            Instance.Type,
+            clients.regionId,
+            olds.create?.regionId,
+          );
+          yield* requireRegion(
+            Instance.Type,
+            clients.regionId,
+            output.regionId,
+          );
           type DeleteDecision = Data.TaggedEnum<{
             Absent: Record<never, never>;
             Deleting: { readonly status: string };

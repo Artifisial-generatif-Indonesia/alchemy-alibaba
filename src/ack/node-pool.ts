@@ -24,12 +24,11 @@ import {
 import type { ModelInput } from "../internal/model-input.ts";
 import type { Providers } from "../providers.ts";
 import { waitForTask } from "./task.ts";
+import { modelMatches } from "../internal/observation.ts";
 
 type NodePoolCreateRequest = ModelInput<ACK.CreateClusterNodePoolRequest>;
 type NodePoolInfo = NonNullable<NodePoolCreateRequest["nodepoolInfo"]>;
-type NodePoolScalingGroup = NonNullable<
-  NodePoolCreateRequest["scalingGroup"]
->;
+type NodePoolScalingGroup = NonNullable<NodePoolCreateRequest["scalingGroup"]>;
 
 export type NodePoolCreate = Omit<
   NodePoolCreateRequest,
@@ -103,9 +102,8 @@ const tagRecord = (
 const tagList = (tags: Readonly<Record<string, string>>) =>
   Object.entries(tags).map(([key, value]) => ({ key, value }));
 
-const observedTags = (
-  pool: ACK.DescribeClusterNodePoolDetailResponseBody,
-) => tagRecord(pool.scalingGroup?.tags);
+const observedTags = (pool: ACK.DescribeClusterNodePoolDetailResponseBody) =>
+  tagRecord(pool.scalingGroup?.tags);
 
 const toAttributes = (
   clusterId: string,
@@ -158,8 +156,20 @@ const modifyMatches = (
   pool: ACK.DescribeClusterNodePoolDetailResponseBody,
   desired: ModelInput<ACK.ModifyClusterNodePoolRequest> | undefined,
 ) =>
-  desired?.scalingGroup?.desiredSize === undefined ||
-  pool.scalingGroup?.desiredSize === desired.scalingGroup.desiredSize;
+  modelMatches(
+    pool,
+    desired === undefined
+      ? undefined
+      : {
+          ...desired,
+          // Tags are owned and checked independently, including internal tags.
+          scalingGroup:
+            desired.scalingGroup === undefined
+              ? undefined
+              : { ...desired.scalingGroup, tags: undefined },
+        },
+    ACK.DescribeClusterNodePoolDetailResponseBody,
+  );
 
 export interface NodePoolProviderOptions {
   readonly wait?: WaitOptions;
@@ -186,10 +196,11 @@ export const NodePoolProvider = (options: NodePoolProviderOptions = {}) =>
             new ACK.DescribeClusterNodePoolsRequest({ nodepoolName: name }),
           ),
         ).pipe(
-          Effect.map((response) =>
-            response.body?.nodepools?.find(
-              (pool) => pool.nodepoolInfo?.name === name,
-            )?.nodepoolInfo?.nodepoolId,
+          Effect.map(
+            (response) =>
+              response.body?.nodepools?.find(
+                (pool) => pool.nodepoolInfo?.name === name,
+              )?.nodepoolInfo?.nodepoolId,
           ),
           Effect.flatMap((nodepoolId) =>
             nodepoolId === undefined
@@ -330,18 +341,21 @@ export const NodePoolProvider = (options: NodePoolProviderOptions = {}) =>
           let pool = yield* observe(news.clusterId, output?.nodepoolId, name);
 
           if (pool === undefined) {
-            const response = yield* sdkCall("ACK", "CreateClusterNodePool", () =>
-              clients.ack.createClusterNodePool(
-                news.clusterId,
-                new ACK.CreateClusterNodePoolRequest({
-                  ...news.create,
-                  nodepoolInfo: { ...news.create.nodepoolInfo, name },
-                  scalingGroup: {
-                    ...news.create.scalingGroup,
-                    tags: tagList(tags),
-                  },
-                }),
-              ),
+            const response = yield* sdkCall(
+              "ACK",
+              "CreateClusterNodePool",
+              () =>
+                clients.ack.createClusterNodePool(
+                  news.clusterId,
+                  new ACK.CreateClusterNodePoolRequest({
+                    ...news.create,
+                    nodepoolInfo: { ...news.create.nodepoolInfo, name },
+                    scalingGroup: {
+                      ...news.create.scalingGroup,
+                      tags: tagList(tags),
+                    },
+                  }),
+                ),
             );
             yield* waitForTask({
               client: clients.ack,
@@ -352,11 +366,7 @@ export const NodePoolProvider = (options: NodePoolProviderOptions = {}) =>
             pool = yield* waitForPresent({
               service: "ACK",
               operation: "CreateClusterNodePool",
-              read: observe(
-                news.clusterId,
-                response.body?.nodepoolId,
-                name,
-              ),
+              read: observe(news.clusterId, response.body?.nodepoolId, name),
               ready,
               wait: options.wait,
             });
@@ -374,18 +384,21 @@ export const NodePoolProvider = (options: NodePoolProviderOptions = {}) =>
               (!isDeepStrictEqual(news.modify, olds?.modify) ||
                 !modifyMatches(pool, news.modify)))
           ) {
-            const response = yield* sdkCall("ACK", "ModifyClusterNodePool", () =>
-              clients.ack.modifyClusterNodePool(
-                news.clusterId,
-                nodepoolId,
-                new ACK.ModifyClusterNodePoolRequest({
-                  ...news.modify,
-                  scalingGroup: {
-                    ...news.modify?.scalingGroup,
-                    tags: tagList(tags),
-                  },
-                }),
-              ),
+            const response = yield* sdkCall(
+              "ACK",
+              "ModifyClusterNodePool",
+              () =>
+                clients.ack.modifyClusterNodePool(
+                  news.clusterId,
+                  nodepoolId,
+                  new ACK.ModifyClusterNodePoolRequest({
+                    ...news.modify,
+                    scalingGroup: {
+                      ...news.modify?.scalingGroup,
+                      tags: tagList(tags),
+                    },
+                  }),
+                ),
             );
             yield* waitForTask({
               client: clients.ack,

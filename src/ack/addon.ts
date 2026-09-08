@@ -16,6 +16,7 @@ import {
 import type { ModelInput, Without } from "../internal/model-input.ts";
 import type { Providers } from "../providers.ts";
 import { waitForTask } from "./task.ts";
+import { jsonConfigMatches } from "../internal/observation.ts";
 
 export interface AddonProps {
   readonly clusterId: string;
@@ -27,10 +28,7 @@ export interface AddonProps {
     ACK.UpgradeClusterAddonsRequestBody,
     "componentName" | "nextVersion" | "config"
   >;
-  readonly uninstall?: Without<
-    ACK.UnInstallClusterAddonsRequestAddons,
-    "name"
-  >;
+  readonly uninstall?: Without<ACK.UnInstallClusterAddonsRequestAddons, "name">;
 }
 
 export interface AddonAttributes {
@@ -145,20 +143,23 @@ export const AddonProvider = (options: AddonProviderOptions = {}) =>
             });
           } else {
             if (addon.version !== news.version) {
-              const response = yield* sdkCall("ACK", "UpgradeClusterAddons", () =>
-                clients.ack.upgradeClusterAddons(
-                  news.clusterId,
-                  new ACK.UpgradeClusterAddonsRequest({
-                    body: [
-                      {
-                        ...news.upgrade,
-                        componentName: news.name,
-                        nextVersion: news.version,
-                        config: news.config,
-                      },
-                    ],
-                  }),
-                ),
+              const response = yield* sdkCall(
+                "ACK",
+                "UpgradeClusterAddons",
+                () =>
+                  clients.ack.upgradeClusterAddons(
+                    news.clusterId,
+                    new ACK.UpgradeClusterAddonsRequest({
+                      body: [
+                        {
+                          ...news.upgrade,
+                          componentName: news.name,
+                          nextVersion: news.version,
+                          config: news.config,
+                        },
+                      ],
+                    }),
+                  ),
               );
               yield* waitForTask({
                 client: clients.ack,
@@ -166,7 +167,7 @@ export const AddonProvider = (options: AddonProviderOptions = {}) =>
                 taskId: response.body?.taskId,
                 wait: options.wait,
               });
-            } else if (addon.config !== news.config) {
+            } else if (!jsonConfigMatches(addon.config, news.config)) {
               yield* sdkCall("ACK", "ModifyClusterAddon", () =>
                 clients.ack.modifyClusterAddon(
                   news.clusterId,
@@ -184,7 +185,7 @@ export const AddonProvider = (options: AddonProviderOptions = {}) =>
             ready: (value) =>
               ready(value) &&
               value.version === news.version &&
-              value.config === news.config,
+              jsonConfigMatches(value.config, news.config),
             wait: options.wait,
           });
           return toAttributes(news.clusterId, output?.name ?? news.name, addon);

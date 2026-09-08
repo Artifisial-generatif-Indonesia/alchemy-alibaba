@@ -13,7 +13,7 @@ import {
   sdkCall,
 } from "../error.ts";
 import {
-  physicalName,
+  accountName,
   waitForAbsent,
   waitForPresent,
   type WaitOptions,
@@ -53,8 +53,7 @@ export type Account = Resource<
 
 export const Account = Resource<Account>("Alibaba.Tair.Account");
 
-type ObservedAccount =
-  Tair.DescribeAccountsResponseBodyAccountsAccount;
+type ObservedAccount = Tair.DescribeAccountsResponseBodyAccountsAccount;
 
 const toAttributes = (
   instanceId: string,
@@ -111,7 +110,8 @@ export const AccountProvider = (options: AccountProviderOptions = {}) =>
           const newSettings = news.settings ?? {};
           return olds.instanceId !== news.instanceId ||
             olds.name !== news.name ||
-            oldSettings.accountPrivilege !== newSettings.accountPrivilege ||
+            (oldSettings.accountPrivilege ?? "RoleReadWrite") !==
+              (newSettings.accountPrivilege ?? "RoleReadWrite") ||
             oldSettings.accountType !== newSettings.accountType ||
             oldSettings.parameters !== newSettings.parameters
             ? ({ action: "replace" } as const)
@@ -120,14 +120,14 @@ export const AccountProvider = (options: AccountProviderOptions = {}) =>
         read: Effect.fn(function* ({ id, olds, output }) {
           const instanceId = olds.instanceId ?? output?.instanceId;
           if (instanceId === undefined) return undefined;
-          const name = yield* physicalName(id, olds.name ?? output?.name, 100);
+          const name = yield* accountName(id, olds.name ?? output?.name, 100);
           const account = yield* get(instanceId, name);
           return account === undefined
             ? undefined
             : toAttributes(instanceId, name, account);
         }),
         reconcile: Effect.fn(function* ({ id, news, olds, output }) {
-          const name = yield* physicalName(id, news.name ?? output?.name, 100);
+          const name = yield* accountName(id, news.name ?? output?.name, 100);
           const settings = news.settings ?? {};
           let account = yield* get(news.instanceId, name);
           if (account === undefined) {
@@ -171,7 +171,10 @@ export const AccountProvider = (options: AccountProviderOptions = {}) =>
                 ),
               );
             }
-            if (olds === undefined || !Equal.equals(olds.password, news.password)) {
+            if (
+              olds === undefined ||
+              !Equal.equals(olds.password, news.password)
+            ) {
               yield* sdkCall("Tair", "ResetAccountPassword", () =>
                 clients.tair.resetAccountPassword(
                   new Tair.ResetAccountPasswordRequest({

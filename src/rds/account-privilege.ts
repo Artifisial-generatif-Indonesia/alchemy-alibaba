@@ -21,7 +21,12 @@ export interface AccountPrivilegeProps {
   readonly instanceId: string;
   readonly accountName: string;
   readonly databaseName: string;
-  readonly privilege: "ReadWrite" | "ReadOnly" | "DDLOnly" | "DMLOnly" | "DBOwner";
+  readonly privilege:
+    | "ReadWrite"
+    | "ReadOnly"
+    | "DDLOnly"
+    | "DMLOnly"
+    | "DBOwner";
 }
 
 export interface AccountPrivilegeAttributes extends AccountPrivilegeProps {
@@ -64,9 +69,7 @@ const normalizePrivilege = (
 ): string | undefined => (privilege === "ALL" ? "DBOwner" : privilege);
 
 const isMissingPrivilege = (error: AlibabaProviderError): boolean =>
-  isNotFound(error) ||
-  error.code === "InvalidDBInfo.Malformed" ||
-  /specified parameter DBInfo is not valid or db not exist/i.test(error.message);
+  isNotFound(error);
 
 /**
  * PostgreSQL privileged ("Super") accounts have implicit access to every
@@ -261,10 +264,9 @@ export const AccountPrivilegeProvider = (
               ),
           ).pipe(
             Effect.map((response) => {
-              const account =
-                response.body?.accounts?.DBInstanceAccount?.find(
-                  (item) => item.accountName === output.accountName,
-                );
+              const account = response.body?.accounts?.DBInstanceAccount?.find(
+                (item) => item.accountName === output.accountName,
+              );
               // If the account is already gone, there is no privilege left to
               // revoke. A privileged account's database access is implicit and
               // is cleaned up when the account itself is deleted.
