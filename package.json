@@ -1,0 +1,87 @@
+{
+  "name": "alchemy-alibaba",
+  "version": "0.1.0",
+  "description": "Effect-native Alibaba Cloud providers for Alchemy v2",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Artifisial-generatif-Indonesia/alchemy-alibaba.git"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./clients": {
+      "types": "./dist/clients.d.ts",
+      "import": "./dist/clients.js"
+    },
+    "./providers": {
+      "types": "./dist/providers.d.ts",
+      "import": "./dist/providers.js"
+    },
+    "./error": {
+      "types": "./dist/error.d.ts",
+      "import": "./dist/error.js"
+    },
+    "./ack": {
+      "types": "./dist/ack/index.d.ts",
+      "import": "./dist/ack/index.js"
+    },
+    "./acr": {
+      "types": "./dist/acr/index.d.ts",
+      "import": "./dist/acr/index.js"
+    },
+    "./rds": {
+      "types": "./dist/rds/index.d.ts",
+      "import": "./dist/rds/index.js"
+    },
+    "./tair": {
+      "types": "./dist/tair/index.d.ts",
+      "import": "./dist/tair/index.js"
+    },
+    "./vpc": {
+      "types": "./dist/vpc/index.d.ts",
+      "import": "./dist/vpc/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "SUPPORT-MATRIX.md",
+    "SPEC-COVERAGE.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm test && npm run build",
+    "prepare": "npm run build"
+  },
+  "dependencies": {
+    "@alicloud/cr20181201": "2.2.3",
+    "@alicloud/credentials": "2.4.7",
+    "@alicloud/cs20151215": "7.2.0",
+    "@alicloud/openapi-core": "1.0.8",
+    "@alicloud/r-kvstore20150101": "6.4.0",
+    "@alicloud/rds20140815": "15.9.0",
+    "@alicloud/vpc20160428": "7.2.5"
+  },
+  "peerDependencies": {
+    "alchemy": "2.0.0-beta.72",
+    "effect": "4.0.0-rc.112"
+  },
+  "devDependencies": {
+    "alchemy": "2.0.0-beta.72",
+    "effect": "4.0.0-rc.112",
+    "@effect/platform-node": "4.0.0-rc.112",
+    "typescript": "6.0.3",
+    "vitest": "4.1.11",
+    "@types/node": "22.19.7"
+  }
+}
