@@ -899,6 +899,67 @@ describe("RDS provider lifecycles", () => {
     expect(fake.instance).toBeDefined();
   });
 
+  it("finishes instance deletion when RDS reports InvalidDBInstanceName.NotFound", async () => {
+    const fake = new StatefulRDSClient();
+    fake.describeDBInstanceAttribute = async () => {
+      throw { code: "InvalidDBInstanceName.NotFound", statusCode: 400 };
+    };
+    const layer = InstanceProvider({ wait: { attempts: 2, interval: 0 } }).pipe(
+      Layer.provide(providerLayer(fake)),
+    );
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const provider = yield* Instance.Provider;
+        yield* provider.delete({
+          ...resourceBase("released-rds"),
+          olds: {
+            create: {
+              engine: "PostgreSQL",
+              engineVersion: "16.0",
+              DBInstanceClass: "test",
+              DBInstanceNetType: "Intranet",
+              DBInstanceStorage: 20,
+              payType: "Postpaid",
+              securityIPList: "127.0.0.1",
+            },
+          },
+          output: {
+            instanceId: "rm-test",
+            name: "example",
+            status: "Running",
+            deletionProtection: false,
+            tags: {},
+          },
+        });
+      }).pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
+    );
+    expect(fake.instanceDeletes).toBe(0);
+  });
+
+  it("does not repeat DeleteDatabase after the database is already absent", async () => {
+    const fake = new StatefulRDSClient();
+    fake.transientFailures.failNext("DeleteDatabase");
+    const layer = DatabaseProvider({ wait: { attempts: 2, interval: 0 } }).pipe(
+      Layer.provide(providerLayer(fake)),
+    );
+    const props = {
+      instanceId: "rm-test",
+      name: "example",
+      characterSetName: "UTF8",
+    };
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const provider = yield* Database.Provider;
+        yield* provider.delete({
+          ...resourceBase("absent-db"),
+          olds: props,
+          output: { ...props, status: "Running" },
+        });
+      }).pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
+    );
+    expect(fake.databaseDeletes).toBe(0);
+  });
+
   it("creates, updates, and deletes a database after a transient failure", async () => {
     const fake = new StatefulRDSClient();
     const layer = DatabaseProvider({ wait: { attempts: 2, interval: 0 } }).pipe(
@@ -1101,6 +1162,72 @@ describe("RDS provider lifecycles", () => {
     ).resolves.toMatchObject(props);
     expect(fake.privilegeGrants).toBe(0);
   });
+
+  it.each([true, false])(
+    "handles PostgreSQL privilege deletion with binding present=%s",
+    async (present) => {
+      const fake = new StatefulRDSClient();
+      fake.instance =
+        new RDS.DescribeDBInstanceAttributeResponseBodyItemsDBInstanceAttribute(
+          {
+            DBInstanceId: "rm-test",
+            engine: "PostgreSQL",
+          },
+        );
+      fake.accounts.set(
+        "owner",
+        new RDS.DescribeAccountsResponseBodyAccountsDBInstanceAccount({
+          accountName: "owner",
+          accountType: "Normal",
+        }),
+      );
+      if (present)
+        fake.databases.set(
+          "example",
+          new RDS.DescribeDatabasesResponseBodyDatabasesDatabase({
+            DBName: "example",
+            accounts:
+              new RDS.DescribeDatabasesResponseBodyDatabasesDatabaseAccounts({
+                accountPrivilegeInfo: [
+                  new RDS.DescribeDatabasesResponseBodyDatabasesDatabaseAccountsAccountPrivilegeInfo(
+                    {
+                      account: "owner",
+                      accountPrivilege: "ALL",
+                    },
+                  ),
+                ],
+              }),
+          }),
+        );
+      const props = {
+        instanceId: "rm-test",
+        accountName: "owner",
+        databaseName: "example",
+        privilege: "DBOwner" as const,
+      };
+      const layer = AccountPrivilegeProvider({
+        wait: { attempts: 2, interval: 0 },
+      }).pipe(Layer.provide(providerLayer(fake)));
+      const result = Effect.runPromise(
+        Effect.gen(function* () {
+          const provider = yield* AccountPrivilege.Provider;
+          return yield* provider.delete({
+            ...resourceBase("pg-delete"),
+            olds: props,
+            output: props,
+          });
+        }).pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
+      );
+      if (present)
+        await expect(result).rejects.toThrow(
+          "PostgreSQL does not support RevokeAccountPrivilege",
+        );
+      else await expect(result).resolves.toBeUndefined();
+      expect(fake.privilegeRevokes).toBe(0);
+      expect(fake.databaseDeletes).toBe(0);
+      expect(fake.accountDeletes).toBe(0);
+    },
+  );
 
   it("does not revoke implicit access from a PostgreSQL privileged account", async () => {
     const fake = new StatefulRDSClient();

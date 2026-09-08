@@ -195,6 +195,8 @@ export const DatabaseProvider = (options: DatabaseProviderOptions = {}) =>
           return toAttributes(news.instanceId, name, database);
         }),
         delete: Effect.fn(function* ({ output }) {
+          if ((yield* get(output.instanceId, output.name)) === undefined)
+            return;
           yield* retryingSdkCall("RDS", "DeleteDatabase", () =>
             clients.rds.deleteDatabase(
               new RDS.DeleteDatabaseRequest({

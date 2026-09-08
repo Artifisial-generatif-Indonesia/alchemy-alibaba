@@ -1,6 +1,8 @@
 # Disposable-stage validation
 
-Status: prepared, not executed. Local tests cover SDK fakes and loopback only.
+Status: a disposable PostgreSQL/VPC/vSwitch smoke run executed on 2026-09-09
+(Jakarta). See the evidence and limitations below. Other scenarios remain
+unverified against live infrastructure.
 This runbook does not authorize cloud access, purchases, or data deletion.
 
 ## Inputs required before execution
@@ -11,8 +13,9 @@ Record these in the approved private task record, never in this repository:
 - Allowed products, engine/version and region-supported SKUs, maximum spend,
   and maximum test duration. Use pay-as-you-go resources, not subscriptions.
 - Persistent state backend and recovery location, with restricted access.
-- Approved synthetic data and private connectivity; no customer data or public
-  database exposure. Credentials come from the official credential chain.
+- Approved synthetic data and connectivity; no customer data. Temporary public
+  access requires explicit approval, a dedicated runner IPv4 /32 whitelist,
+  verified TLS, and tracked cleanup. Credentials use the official chain.
 - Approval to create, update, release, and clean up only this stage's resources,
   including the intended treatment of retained backups and recycle-bin data.
 
@@ -92,8 +95,13 @@ private keys, passwords, or raw error dumps in the evidence.
 
 ## First RDS smoke stack
 
-[`examples/live-rds.alchemy.ts`](examples/live-rds.alchemy.ts) declares exactly
-six resources: a VPC, vSwitch, PostgreSQL Basic instance, generated account,
+**Known PostgreSQL limitation:** the separate DBOwner grant cannot be revoked
+through the RDS API. This example currently needs reviewed ownership cleanup
+before ordinary destroy; see the observed workaround below. Do not assume the
+six-resource example has an unattended end-to-end deletion lifecycle.
+
+[`examples/live-rds.alchemy.ts`](examples/live-rds.alchemy.ts) declares
+six base resources: a VPC, vSwitch, PostgreSQL Basic instance, generated account,
 database, and database-owner grant. It accepts only `test-rds-*` stages and uses
 Alchemy's persistent local state with an owner-only process umask. Run every
 command from the same dedicated private directory and retain that directory
@@ -114,6 +122,54 @@ reapply, controlled updates, and `destroy` with the same paths and stage.
 The stack initially allows only `127.0.0.1` and creates no public endpoint.
 A real SQL test additionally needs a separately tracked temporary public
 connection, a dedicated allowlist group restricted to the runner's current
-public IPv4 `/32`, and SSL with certificate verification. Remove that connection
-and allowlist group before teardown. Do not change the create-time whitelist
+public IPv4 `/32`, and SSL with certificate verification. `SMOKE_SSL_ENDPOINT` configures the approved protected hostname and
+`SMOKE_RUNNER_IPV4` adds a seventh resource for the dedicated /32 group.
+Release the public connection and reset the group to loopback before teardown. Do not change the create-time whitelist
 input to run this check: create identity changes can replace the instance.
+
+
+## PostgreSQL smoke evidence (2026-09-09 Jakarta)
+
+The approved disposable run used PostgreSQL 16 Basic, 20 GB ESSD, in Jakarta.
+Resource IDs, credentials, state, and raw operational evidence remain outside
+this repository in the private test record.
+
+Passed against live APIs and PostgreSQL:
+
+- VPC, vSwitch, RDS, account, database, and DBOwner grant creation.
+- Fresh-process unchanged redeploys with stable physical IDs and no-op plans.
+- Descriptions/tags, password rotation, and deletion protection off/on updates.
+- Temporary public connectivity restricted to one IPv4 /32, Alibaba CA and
+  hostname verification, and TLS 1.3 SQL connections.
+- Table creation and committed data, persistence after provider updates,
+  transactional DDL/data rollback, new-password login and old-password rejection.
+- Public endpoint release and whitelist reset to loopback, independently read
+  back before instance release.
+
+The first teardown did **not** succeed unassisted. PostgreSQL's ordinary account
+ownership was reported as `ALL` by DescribeDatabases, and a successful
+RevokeAccountPrivilege response did not remove it. The official API explicitly
+excludes PostgreSQL. The provider now fails immediately for an observed ordinary
+PostgreSQL binding; it does not silently retain it or delete its database/account.
+Such bindings require reviewed SQL ownership/permission changes before deletion.
+Do not use this resource as a fully reversible PostgreSQL permission manager.
+
+For this synthetic test only, the database was explicitly deleted to remove the
+binding before resuming the saved Alchemy destroy. That recovery exposed two
+additional issues now covered by regression tests: DeleteDatabase must first
+observe already-absent databases, and RDS instance absence can be returned as
+`InvalidDBInstanceName.NotFound`.
+
+Final cleanup: saved-state destroy completed, and independent RDS detail/list,
+vSwitch detail, and VPC list queries confirmed absence. No resource state rows
+remain. One service-managed ENI delayed vSwitch deletion for several minutes;
+the existing bounded dependency waiter completed without force-deleting it.
+DescribeDetachedBackups reported zero records. This does not establish permanent
+recycle-bin removal or final billing. Local verification passed 146 tests across
+15 files, TypeScript checking, and the build.
+
+Not covered: ACK, RDS resize/serverless, custom certificate rotation, production
+migrations, or guaranteed permanent removal of recycle-bin data/retained backups.
+The quoted instance rate was USD 0.0914/hour; subsequent billing is not verified.
+
+Reference: [RevokeAccountPrivilege engine support](https://www.alibabacloud.com/help/en/rds/developer-reference/api-rds-2014-08-15-revokeaccountprivilege).

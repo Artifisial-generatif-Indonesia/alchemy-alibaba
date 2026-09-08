@@ -237,6 +237,7 @@ const absentResourceCodes: Record<AlibabaService, ReadonlySet<string>> = {
   ]),
   RDS: new Set([
     "InvalidDBInstanceId.NotFound",
+    "InvalidDBInstanceName.NotFound",
     "InvalidDBName.NotFound",
     "InvalidAccountName.NotFound",
     "InvalidAccount.NotFound",

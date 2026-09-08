@@ -47,7 +47,7 @@ is not treated as proof that Alibaba has detached its hidden vSwitch relation.
 | RDS     | `Instance`          | create/read/resize/delete, full create/spec/delete request inputs, private normal endpoint/IP discovery, SSL and certificate controls, deletion protection, ownership tags, tag drift, readiness waits       |
 | RDS     | `Database`          | create/read/update/delete, charset, description, and full create request extras                                                                                                                              |
 | RDS     | `Account`           | create/read/update/delete, redacted password rotation, account type, policy and description                                                                                                                  |
-| RDS     | `AccountPrivilege`  | observe/grant/change/revoke per-database privileges                                                                                                                                                          |
+| RDS     | `AccountPrivilege`  | observe/grant/change privileges; PostgreSQL revoke unsupported (see LIVE-VALIDATION.md)                                                                                                                                                          |
 | RDS     | `SecurityIpGroup`   | read/cover/reset named IP arrays, enhanced whitelist settings                                                                                                                                                |
 
 The generated Alibaba SDK models are converted to plain structural input types

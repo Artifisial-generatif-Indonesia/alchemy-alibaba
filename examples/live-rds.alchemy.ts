@@ -24,6 +24,8 @@ export default Alchemy.Stack(
       storage: Config.number("SMOKE_RDS_STORAGE_GB"),
       storageType: Config.string("SMOKE_RDS_STORAGE_TYPE"),
       password: Config.redacted("SMOKE_RDS_PASSWORD"),
+      sslEndpoint: Config.option(Config.string("SMOKE_SSL_ENDPOINT")),
+      runnerIp: Config.option(Config.string("SMOKE_RUNNER_IPV4")),
       revision: Config.string("SMOKE_REVISION").pipe(
         Config.withDefault("baseline"),
       ),
@@ -47,6 +49,14 @@ export default Alchemy.Stack(
     const instance = yield* Alibaba.RDS.Instance("instance", {
       name: `${stage}-db`,
       deletionProtection: config.protection,
+      ssl:
+        config.sslEndpoint._tag === "Some"
+          ? {
+              SSLEnabled: 1,
+              CAType: "aliyun",
+              connectionString: config.sslEndpoint.value,
+            }
+          : undefined,
       tags,
       create: {
         engine: "PostgreSQL",
@@ -63,6 +73,22 @@ export default Alchemy.Stack(
         securityIPList: "127.0.0.1",
       },
     });
+    const ipGroup =
+      config.runnerIp._tag === "Some"
+        ? yield* Alibaba.RDS.SecurityIpGroup("runner-access", {
+            instanceId: instance.instanceId,
+            name: "smoke_runner",
+            securityIps: [
+              `${yield* Schema.decodeUnknownEffect(
+                Schema.String.check(
+                  Schema.isPattern(
+                    /^(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])$/,
+                  ),
+                ),
+              )(config.runnerIp.value).pipe(Effect.orDie)}/32`,
+            ],
+          })
+        : undefined;
     const account = yield* Alibaba.RDS.Account("account", {
       instanceId: instance.instanceId,
       password: config.password,
@@ -71,6 +97,7 @@ export default Alchemy.Stack(
     const database = yield* Alibaba.RDS.Database("database", {
       instanceId: instance.instanceId,
       accountNames: [account.name],
+      securityGroupName: ipGroup?.name,
       name: "smoke_db",
       characterSetName: "UTF8",
       description: `Disposable smoke database ${config.revision}`,
