@@ -6,7 +6,8 @@ Candidate: `alchemy-alibaba@0.2.0`, npm channel `latest`, GitHub tag
 
 ## Preparation (no publication)
 
-Use Node 22.22.1 and pnpm (selected by `packageManager`), then run from the repository root:
+Use Node 22.12.0 or newer and pnpm (selected by `packageManager`), then run from the repository root.
+CI uses Node 22.22.1; publishing also accepts newer Node versions:
 
 ```sh
 pnpm install --frozen-lockfile
@@ -39,7 +40,7 @@ access. Confirm those with the intended publisher before the first publication.
 ## Publish from another machine
 
 Clone the repository and check out the reviewed release commit whose CI passed.
-Use Node 22.22.1 and log in once with
+Use Node 22.12.0 or newer and log in once with
 `pnpm login --registry=https://registry.npmjs.org/`.
 Then run this single command from the clean checkout:
 

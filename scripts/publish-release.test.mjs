@@ -3,6 +3,15 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { assertNodeVersion } from "./package-manager.mjs";
+
+const requirement = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).engines.node;
+test.each(["22.12.0", "22.22.1", "24.0.0", "26.5.0"])("release runtime accepts Node %s", version => {
+  expect(() => assertNodeVersion(requirement, version)).not.toThrow();
+});
+test.each(["20.19.0", "22.11.0"])("release runtime rejects Node %s", version => {
+  expect(() => assertNodeVersion(requirement, version)).toThrow("Use Node >=22.12.0");
+});
 
 const directories = [];
 afterEach(() => directories.splice(0).forEach(dir => rmSync(dir, { recursive: true, force: true })));
@@ -16,6 +25,7 @@ function run(mode = "success", args = []) {
   }
   writeFileSync(path.join(root, "package.json"), JSON.stringify({
     name: "alchemy-alibaba", version: "0.2.0",
+    engines: { node: requirement },
     publishConfig: { registry: "https://registry.npmjs.org/", access: "public", tag: "latest" },
   }));
   writeFileSync(path.join(root, ".gitignore"), "artifacts/\ncalls.jsonl\n");
@@ -68,7 +78,7 @@ test("installs and validates before publishing the exact artifact, then verifies
   expect(result.status, result.stderr).toBe(0);
   expect(result.calls.map(args => args[0])).toEqual(["whoami", "install", "run", "publish", "view", "view"]);
   const publish = result.calls.find(args => args[0] === "publish");
-  expect(publish[1]).toMatch(/artifacts\/0.2.0\/alchemy-alibaba-0.2.0.tgz$/);
+  expect(publish[1].split(path.sep).join("/")).toMatch(/artifacts\/0.2.0\/alchemy-alibaba-0.2.0.tgz$/);
   expect(publish.slice(2)).toEqual(["--ignore-scripts", "--no-git-checks", "--tag", "latest", "--access", "public", "--registry=https://registry.npmjs.org/"]);
 });
 

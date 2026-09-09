@@ -1,4 +1,4 @@
-import { runPnpm } from "./package-manager.mjs";
+import { assertNodeVersion, runPnpm } from "./package-manager.mjs";
 import { parse, stringify } from "yaml";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -22,7 +22,7 @@ for (const section of ["dependencies", "devDependencies"]) {
 assert.equal(pkg.publishConfig.tag, "latest");
 assert.equal(pkg.publishConfig.access, "public");
 assert.equal(pkg.publishConfig.registry, "https://registry.npmjs.org/");
-assert.equal(process.versions.node.split(".")[0], "22", "Release validation uses Node 22");
+assertNodeVersion(pkg.engines.node);
 const pnpm = (args, cwd = root) => runPnpm(args, {
   cwd, encoding: "utf8", timeout: 300_000, maxBuffer: 10 * 1024 * 1024,
   env: { ...process.env, ALCHEMY_TELEMETRY_DISABLED: "1" },

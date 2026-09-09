@@ -1,4 +1,4 @@
-import { runPnpm } from "./package-manager.mjs";
+import { assertNodeVersion, runPnpm } from "./package-manager.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -11,7 +11,6 @@ const args = process.argv.slice(2);
 assert.ok(args.length === 0 || (args.length === 1 && args[0] === "--dry-run"),
   "Usage: pnpm run release:publish [--dry-run]");
 const dryRun = args.includes("--dry-run");
-assert.equal(process.versions.node.split(".")[0], "22", "Use Node 22");
 const pnpm = (args, capture = false) => runPnpm(args, {
   cwd: root, stdio: capture ? "pipe" : "inherit", encoding: "utf8",
 });
@@ -22,6 +21,7 @@ const clean = () => assert.equal(execFileSync("git", ["status", "--porcelain"], 
 }).trim(), "", "Publish from a clean, committed checkout");
 clean();
 const pkg = json(path.join(root, "package.json"));
+assertNodeVersion(pkg.engines.node);
 const registry = "--registry=https://registry.npmjs.org/";
 assert.equal(pkg.publishConfig.registry, "https://registry.npmjs.org/");
 assert.equal(pkg.publishConfig.tag, "latest");

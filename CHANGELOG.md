@@ -8,6 +8,9 @@ not claimed.
 
 ### Changes
 
+- Accept the package's declared Node minimum (22.12.0) in release scripts,
+  including newer versions such as Node 26.
+
 - Use pnpm for installation, CI, package validation, and single-command
   publishing with `pnpm run release:publish` (or `--dry-run` to rehearse).
 
