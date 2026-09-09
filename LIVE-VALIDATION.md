@@ -1,7 +1,7 @@
 # Disposable-stage validation
 
-Status: a disposable PostgreSQL/VPC/vSwitch smoke run executed on 2026-09-09
-(Jakarta). See the evidence and limitations below. Other scenarios remain
+Status: disposable PostgreSQL/VPC/vSwitch smoke runs executed on 2026-09-09
+(Jakarta), including a rerun of candidate `9c68310`. See the evidence and limitations below. Other scenarios remain
 unverified against live infrastructure.
 This runbook does not authorize cloud access, purchases, or data deletion.
 
@@ -172,6 +172,57 @@ The quoted instance rate was USD 0.0914/hour; subsequent billing is not verified
 
 Reference: [RevokeAccountPrivilege engine support](https://www.alibabacloud.com/help/en/rds/developer-reference/api-rds-2014-08-15-revokeaccountprivilege).
 
+## 0.2.0 candidate rerun (2026-09-09 Jakarta)
+
+Candidate `9c68310` was tested with the direct desired-state inputs in
+`examples/live-rds.alchemy.ts`, Node 22.22.1, and persistent private local state.
+The run reused the earlier region and configuration: PostgreSQL 16 Basic,
+2 vCPU / 4 GB, 20 GB PL1 ESSD, Jakarta zone A. All resources and data were
+disposable; account configuration, credentials, resource IDs, and raw logs remain
+outside this repository. The earlier test's active resources were independently
+confirmed absent before this run.
+
+The measured deployment-to-verified-cleanup window was **10 minutes 58 seconds**
+(00:52:42–01:03:40 UTC), including the interventions and time between commands.
+Private test preparation through cleanup took **12 minutes 7 seconds**.
+
+| Operation | Measured duration | Outcome |
+| --- | --- | --- |
+| Initial deployment | 208 seconds | VPC, vSwitch and RDS created; account rejected an overlong synthetic password |
+| Resume after correcting test password | 8 seconds | Remaining resources created; existing instance/network reused |
+| Unchanged redeploys in fresh processes | 4 seconds each | Six baseline resources, then seven with runner access, all no-op |
+| Enable SSL and restricted runner access | 87 seconds | Waited for SSL completion; verified TLS 1.3 SQL subsequently passed |
+| Password, tags/descriptions and protection update | 7 seconds | Stable IDs; independent API readback passed |
+| Re-enable protection | 6 seconds | Independent API readback passed |
+| Close public access | 9 seconds | Endpoint absent; runner whitelist reset to loopback |
+| Prepare destruction | 6 seconds | Protection disabled and temporary IP-group resource removed |
+| Initial destruction | 5 seconds | Explicitly rejected unsupported PostgreSQL ordinary ownership revocation |
+| Delete this run's synthetic database | 2 seconds | Scoped, journaled intervention for the known limitation |
+| Resume destruction | 100 seconds | Saved-state destroy completed, including delayed network cleanup |
+
+SQL checks verified committed data survived the updates, the new password worked,
+the old password was rejected, and transactional schema/data changes rolled back.
+The CA download was unavailable while SSL reported `setting`; it succeeded after
+the provider completed its readiness wait. The first account error was caused by
+the test harness generating a password longer than the API's 32-character maximum;
+the corrected password met the documented constraints. No provider source changes
+were required by this rerun. PostgreSQL privilege deletion still required the
+documented intervention, so this was not an unattended teardown pass.
+
+Independent final reads confirmed the RDS instance, VPC and vSwitch absent,
+zero network interfaces in the test network, zero detached backups, and zero
+remaining resource state rows. One service-managed ENI was observed during cleanup
+and disappeared without force deletion. Permanent recycle-bin removal and final
+billing remain unverified.
+
+The fresh `DescribePrice` quote was **USD 0.0914/hour**, including instance and
+storage. An allowance for two hourly database charges is **USD 0.1828**, before
+tax or any separately billed retained objects; this is not an observed bill.
+The authorized validation budget was USD 30. This run supports a minutes-scale
+estimate for this specific RDS/VPC smoke, not an estimate for the full provider
+matrix. ECS, ACK, Kubernetes, ACR, RAM, Tair, NAT, resize and restore were not
+exercised by this rerun.
+
 ## 0.2.0 complete live validation plan
 
 Run this after the local release gate passes, against the exact candidate commit.
@@ -179,8 +230,8 @@ Run this after the local release gate passes, against the exact candidate commit
 features tested only on an edition/engine that supports them. Record each case
 as passed, failed, API-unsupported, or not run; an unsupported result needs a
 service reference and the observed safe error code. Never count not-run cases
-as passes. The PostgreSQL smoke above is historical evidence, not a rerun of
-this candidate.
+as passes. The candidate rerun above covers only the listed PostgreSQL/VPC smoke
+operations; it does not satisfy the broader matrix below.
 
 | Stage | Resources and checks | Completion evidence |
 | --- | --- | --- |

@@ -11,6 +11,12 @@ Verification layers:
 - **Stack**: Alchemy `deploy`/`destroy` with temporary persisted state.
 - **Live**: disposable `test-*` Alibaba stage. Not part of the repository gate.
 
+Candidate `9c68310` repeated the PostgreSQL/VPC smoke on 2026-09-09, completing
+deployment through independently verified cleanup in 10 minutes 58 seconds.
+The known PostgreSQL ownership cleanup intervention remains necessary. See
+[candidate rerun evidence](./LIVE-VALIDATION.md#020-candidate-rerun-2026-09-09-jakarta);
+this does not extend live coverage to the other resources.
+
 Bindings: Consumers pass typed attributes (`vpcId`, `vSwitchId`,
 `instanceId`, kubeconfig/env outputs). No Alchemy `Binding` types are
 registered. Do not add them speculatively.

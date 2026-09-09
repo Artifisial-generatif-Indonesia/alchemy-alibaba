@@ -54,6 +54,10 @@ redeploys, stable IDs, tags/descriptions, password rotation, protection changes,
 verified TLS SQL, transactional rollback, and final active-resource removal.
 Teardown required a scoped synthetic database cleanup for the unsupported
 PostgreSQL ownership-revocation case; it was not an unattended success.
+Candidate `9c68310` repeated these checks with the 0.2.0 desired-state inputs:
+deployment through verified cleanup took 10 minutes 58 seconds, with the same
+documented ownership-cleanup intervention. See LIVE-VALIDATION.md for timings,
+the corrected test-password input, and the quote versus final-billing distinction.
 
 ### Compatibility and limitations
 
