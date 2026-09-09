@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile, mkdir, cp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -110,11 +111,36 @@ try {
   );
   const outputDirectory = path.resolve(root, "../../artifacts/rds-access");
   await mkdir(outputDirectory, { recursive: true });
-  await cp(tarball, path.join(outputDirectory, path.basename(tarball)));
+  const filename = path.basename(packed.filename);
+  await cp(tarball, path.join(outputDirectory, filename));
+  const bytes = await readFile(tarball);
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  const integrity = `sha512-${createHash("sha512").update(bytes).digest("base64")}`;
+  await writeFile(
+    path.join(outputDirectory, "SHA256SUMS"),
+    `${sha256}  ${filename}\n`,
+  );
+  await writeFile(
+    path.join(outputDirectory, "verification.json"),
+    JSON.stringify({
+      name: pkg.name,
+      version: pkg.version,
+      tag: pkg.publishConfig.tag,
+      node: process.versions.node,
+      pnpm: pnpm(["--version"]).trim(),
+      tarball: filename,
+      sha256,
+      integrity,
+      fileCount: files.size,
+      cliVerified: true,
+      consumerTypecheck: true,
+      noAlchemyDependency: true,
+    }, null, 2) + "\n",
+  );
   console.log(
     `Verified ${pkg.name}@${pkg.version}: ${files.size} files, CLI, exports and consumer types; no Alchemy dependency.`,
   );
-  console.log(`Tarball: ${path.join(outputDirectory, path.basename(tarball))}`);
+  console.log(`Tarball: ${path.join(outputDirectory, filename)}`);
 } finally {
   await rm(temp, { recursive: true, force: true });
 }

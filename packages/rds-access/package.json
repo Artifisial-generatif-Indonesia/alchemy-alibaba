@@ -25,6 +25,7 @@
   },
   "publishConfig": {
     "access": "public",
+    "tag": "latest",
     "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
@@ -33,6 +34,7 @@
     "test": "vitest run",
     "check": "pnpm run typecheck && pnpm test && pnpm run build",
     "check:package": "node scripts/check-package.mjs",
+    "publish:package": "node scripts/publish-package.mjs",
     "prepack": "pnpm run build"
   },
   "dependencies": {

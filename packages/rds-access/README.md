@@ -215,6 +215,25 @@ Alchemy dependency. It saves the verified tarball under `artifacts/rds-access`.
 
 The root `pnpm check` also checks this subpackage. Its version, npm artifact,
 and release are independent of `alchemy-alibaba`; the root provider's
-`release:publish` command publishes only the provider. Verify the subpackage
-tarball in a fresh consumer and establish npm name ownership before publishing
-its reviewed artifact. Packing and testing do not publish or modify RDS.
+`release:publish` command publishes only the provider.
+
+Publish this subpackage from a clean, committed checkout with one command:
+
+```sh
+pnpm --filter alibaba-rds-access publish:package
+```
+
+Log in first with `pnpm login --registry=https://registry.npmjs.org/`; the
+command's login/2FA prompts use your terminal. It runs the full source checks
+and package verification, requires a clean checkout, verifies the tarball's
+SHA-256 and npm integrity against `artifacts/rds-access/verification.json`,
+publishes that exact tarball publicly to `latest`, and confirms the published
+integrity and tag. It stops on failure and never retries publication
+automatically. To exercise everything except publication and the npm login:
+
+```sh
+pnpm --filter alibaba-rds-access publish:package --dry-run
+```
+
+Establish npm name ownership before the first publication of a reviewed
+artifact. Packing and testing do not publish or modify RDS.
