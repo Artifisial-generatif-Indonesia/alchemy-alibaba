@@ -36,7 +36,33 @@ release commit's CI result and prepare its artifact from that clean checkout.
 Local preparation does not establish npm package-name ownership or publishing
 access. Confirm those with the intended publisher before the first publication.
 
-## Publication (separate explicit authorization)
+## Publish from another machine
+
+Clone the repository and check out the reviewed release commit whose CI passed.
+Use Node 22.22.1 and log in once with
+`npx --yes npm@11.19.1 login --registry=https://registry.npmjs.org/`.
+Then run this single command from the clean checkout:
+
+```sh
+npx --yes npm@11.19.1 run release:publish
+```
+
+It checks npm authentication, runs `npm ci` and `release:prepare`, verifies the
+tarball against both its SHA-256 checksum and npm integrity, publishes that exact
+tarball publicly to `latest`, and checks the published integrity and tag.
+The npm login/2FA prompts use your terminal. No token is stored in the repository.
+The command requires no preinstalled project dependencies and uses the version
+from `package.json`. It stops on failure and never retries publication automatically.
+It publishes to npm; Git tags and GitHub releases remain the steps below.
+
+To exercise the same preparation and checksum checks without publishing or
+requiring npm login:
+
+```sh
+npx --yes npm@11.19.1 run release:publish -- --dry-run
+```
+
+## Manual publication
 
 The following steps change external services. They are not run by preparation
 or CI. Authenticate using the publisher's supported npm login/2FA flow; never

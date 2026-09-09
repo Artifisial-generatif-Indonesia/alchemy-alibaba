@@ -82,7 +82,8 @@
     "prepare": "npm run build",
     "check:security": "npm audit --audit-level=moderate",
     "check:package": "node scripts/prepare-release.mjs",
-    "release:prepare": "npm run check && npm run check:security && npm run check:package"
+    "release:prepare": "npm run check && npm run check:security && npm run check:package",
+    "release:publish": "node scripts/publish-release.mjs"
   },
   "dependencies": {
     "@alicloud/cr20181201": "2.2.3",
