@@ -3,7 +3,10 @@
 Status: disposable PostgreSQL/VPC/vSwitch and ACK smoke runs executed on
 2026-09-09 (Jakarta), including a PostgreSQL rerun of candidate `9c68310`.
 See the evidence and limitations below. The live Kubernetes Secret test was
-blocked by missing SLB ACL permissions; other unlisted scenarios remain unverified.
+blocked by missing SLB ACL permissions. Later non-ACR loops covered MySQL and
+Tair and found additional lifecycle bugs; ECS and NAT creation were permission
+blocked. MySQL was subsequently excluded from further tests by the user.
+Other unlisted scenarios remain unverified.
 This runbook does not authorize cloud access, purchases, or data deletion.
 
 ## Inputs required before execution
@@ -311,6 +314,134 @@ additional. The private plan reserved USD 8 within the user's USD 30 validation
 budget and capped this stage at four hours; this is a spending allowance, not a
 measured bill. The short second-worker interval and hourly rounding must be
 included when reviewing subsequent billing.
+
+## 0.2.0 non-ACR live loops (2026-09-09, Jakarta)
+
+These disposable stages exercised `c0e16a6` and the lifecycle corrections
+committed as `7c2b4de`, under the existing USD 30 validation budget. ACR was explicitly
+excluded. Private credentials, state, inventory identifiers, and logs remain
+outside the repository. The ECS and NAT results below are permission-blocked
+creation attempts, not successful VM or gateway lifecycle coverage.
+
+### ECS and NAT partial-deployment recovery
+
+ECS `ImportKeyPair`, `CreateDisk`, and `CreateSecurityGroup` returned
+`Forbidden.RAM`. No VM, data disk, key pair, or security group was created.
+The independent VPC, vSwitch, and EIP did provision. Initial creation failed after
+25 seconds. Cleanup exposed unresolved parent identities in ECS rule and disk
+attachment reads and EIP association reads. The provider now waits for the
+required identities before reading, and explicitly handles absent observations.
+The loopback simulator now reproduces the real missing-security-group-ID error;
+a persisted-stack regression verifies cleanup after denied parent creation and
+rejects unscoped disk observations.
+
+Resuming the original saved state with the fix completed cleanup in 4.7 seconds,
+without editing state or manually deleting the remaining VPC. Independent API
+reads confirmed no tracked VM, disk, key, security group, EIP, ENI, vSwitch, or
+VPC remained, and resource state was empty. VM bootstrap, SSH, replacement,
+resize, disk attachment, and security-group membership changes remain untested.
+
+NAT `CreateNatGateway` also returned `Forbidden.RAM`; its VPC, vSwitch, and EIP
+had provisioned. Creation failed after 25 seconds, and ordinary Alchemy cleanup
+with the fixed provider took 15 seconds. Independent name-filtered API reads
+confirmed that no stage VPC, EIP, or NAT remained. NAT/SNAT updates and traffic
+were not tested. These denials need an authorized operator to adjust the test
+profile before another connected attempt; the provider did not change IAM.
+
+### MySQL lifecycle and settings
+
+A disposable MySQL 8.0 Basic instance with 20 GB ESSD storage deployed with its
+VPC/vSwitch, generated account, database, and `ReadWrite` binding in **120 seconds**.
+The initial unchanged deploy took four seconds. A tracked temporary public
+endpoint and runner-only IPv4 /32 group enabled hostname-verified TLS 1.2 SQL
+checks using the Alibaba CA chain downloaded during the preceding PostgreSQL
+run. The MySQL SSL API did not return its own CA download URL.
+
+Passed: synthetic table writes/reads and DML rollback; `ReadWrite` → `ReadOnly`
+(six seconds, writes denied and reads preserved); password rotation and return
+to `ReadWrite` (nine seconds, old password rejected); metadata/tags and deletion
+protection update; in-place `mysql.n2.medium.1` → `mysql.n4.medium.1` resize with
+20 → 30 GB storage (**6 minutes 45 seconds**), stable instance identity, and data
+survival. Supported parameter, backup scheduling, and maintenance-window
+changes then converged, followed by an unchanged seven-resource no-op.
+
+The `max_connections: "128"` test exposed an Alibaba-specific read mismatch.
+Change history reported `Applied`, while `DescribeParameters` and SQL reported
+648 because that running value includes reserved management connections.
+`DescribeDBInstanceAttribute.MaxConnections` correctly reported 128. The provider
+now uses the user connection limit for MySQL's parameter comparison; it does not
+subtract a hard-coded reservation. A regression also verifies no-op, drift
+repair, and a second limit change. See Alibaba's
+[maximum connection guidance](https://www.alibabacloud.com/help/zh/doc-detail/469562.html).
+Two observation-only applies were interrupted during diagnosis; the corrected
+saved-state apply completed in ten seconds, without recreating the database.
+
+Removing the independent privilege resource took seven seconds, and a fresh
+`DescribeAccounts` read confirmed that the database binding was absent. This
+engine required no PostgreSQL ownership workaround. Public endpoint release
+first returned `IncorrectDBSslStatus`; removing runner access and disabling SSL
+through Alchemy allowed its release. Ordinary database/account/instance deletion
+then succeeded. vSwitch deletion initially returned `DependencyViolation.Rds`,
+which the provider now retries alongside delayed ENI and Kvstore detachment.
+Resuming saved-state cleanup with that fix took 45 seconds. Independent API reads
+confirmed no instance, vSwitch, VPC, ENI, or resource state remained, and detached
+backup enumeration returned zero. Permanent recycle-bin removal and the final
+bill remain unverified.
+
+The live instance quotes were USD 0.0914/hour initially and USD 0.1141/hour for
+the resized instance with 30 GB storage. This diagnostic loop lasted roughly
+32 minutes through verified cleanup, including investigation and retries, within
+its USD 4 spending reserve. The reserve is not a measured bill.
+
+### Tair findings
+
+A disposable cloud-native Redis 7.0 stage exposed three Alibaba-specific
+mismatches. `CreateInstance` accepts `nodeType: "MASTER_SLAVE"`, while the detail
+API returns `double`. Comparison now recognizes the equivalent node-type
+vocabularies and preserves the requested form on the wire. See Alibaba's
+[instance detail API](https://www.alibabacloud.com/help/doc-detail/473779.html).
+A later size change rejected the unchanged `MajorVersion: "7.0"` field with
+`InvalidParameter`; resize requests now omit the engine version when it already
+matches. Separate protocol regressions prove alias comparison, real node-type
+drift, and A → B → A resizing without an unnecessary engine-upgrade request.
+The corrected live 1 → 2 GB resize plus SSL enablement completed in 6 minutes
+12 seconds. Task history reported resize success before all detail reads had
+converged; the provider continued waiting for the actual requested state.
+
+`CreateAccount` repeatedly returned HTTP 500 `InternalFailure` for the generated
+65-character name. Isolated account probes accepted 32 and 33 characters and
+rejected 63 and 64; this does not establish the exact service limit. The provider
+now generates 32-character names, and a new generated account succeeded live.
+Explicit and saved account names remain authoritative. The probes were confined
+to the disposable instance and removed through Alchemy. This is a measured
+workaround for this Redis 7 cloud-native variant, not a claim that the API's
+documented 100-character allowance is universally wrong.
+
+The return resize and default-account password rotation completed, but concurrent
+account-password and allowlist changes were rejected with
+`IncorrectDBInstanceState`. Child idempotent mutations now use the same bounded
+acceptance wait as the parent, including safe retries during deletion. Protocol
+coverage injects the state error into description/password/allowlist updates and
+account/group deletion. Resuming the two failed children from saved state passed.
+A subsequent overlapping default/child-password, metadata, and allowlist apply
+passed in **1 minute 50 seconds**, and the final fresh-process apply was a
+six-resource no-op in four seconds. Independent reads confirmed the original
+instance ID across **1 → 2 → 1 GB**, SSL enabled, VPC authentication enabled,
+`maxmemory-policy: noeviction`, the desired named allowlist and account settings,
+and release protection disabled for cleanup. These are control-plane checks;
+Redis client TLS, authentication rejection, and data survival were not tested.
+No Tair public endpoint was created.
+
+Ordinary Alchemy teardown removed the accounts and allowlist before releasing
+and destroying the instance, then waited for `DependencyViolation.Kvstore` to
+clear before removing the subnet and VPC. It completed in **4 minutes 52 seconds**
+without an out-of-band cleanup or state edit. Independent detail and overview
+reads confirmed instance absence, including no `Released` entry; vSwitch, VPC,
+ENI inventory and resource state were also empty. The complete diagnostic stage
+lasted **41 minutes 46 seconds**, including failed attempts, fixes, probes, and
+cleanup. Quotes were USD 0.0378887043/hour at 1 GB and USD 0.0616597615/hour at
+2 GB, within the USD 4 stage reserve. Final billing remains unverified.
+
 
 ## 0.2.0 complete live validation plan
 
