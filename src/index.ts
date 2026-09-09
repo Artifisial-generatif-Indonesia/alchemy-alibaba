@@ -8,3 +8,5 @@ export * from "./clients.ts";
 export * from "./error.ts";
 export * from "./providers.ts";
 export type { ModelInput } from "./internal/model-input.ts";
+export * as Kubernetes from "./kubernetes/index.ts";
+export * as RAM from "./ram/index.ts";

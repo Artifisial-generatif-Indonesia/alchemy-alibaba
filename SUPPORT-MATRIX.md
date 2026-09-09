@@ -180,5 +180,31 @@ cleanup before instance deletion. ECS instance and group inventory is regional
 and paginated, and ambiguous names fail explicitly. ECS adds two tagged resource
 types to the enumeration table above; ingress is parent-keyed and has no regional
 list. See [ECS.md](ECS.md) for adoption, replacement, shutdown, auto-expiry,
-bootstrap and retention boundaries. No standalone data disk, EIP, IPv6/egress
-rule or cloud-init completion resource is included.
+bootstrap and retention boundaries. Standalone disks, EIPs and IPv6/egress rules are included in the 0.2.0
+additions below. Cloud-init completion remains outside infrastructure readiness.
+
+## 0.2.0 additions from the Alchemy comparison
+
+| Capability | Implemented behavior | Local evidence | Connected evidence |
+| --- | --- | --- | --- |
+| ACK connection/kubeconfig | Temporary redacted kubeconfig; serializable connection, private/public endpoint; upstream Kubernetes adapter with token or mTLS | `kubernetes/integration.test.ts` SDK fake + loopback HTTPS | None |
+| Kubernetes Secret | Redacted UTF-8 data, base64 at apply, sanitized diagnostics; delegates upstream Manifest | Local HTTPS create/read/rotation/delete + error echo regression | None |
+| Desired resource inputs | Flat desired fields without 0.1.0 aliases, mutable changes in place, explicit-name replacement guard, authoritative saved IDs, ambiguous-name rejection | `protocol/review-regressions.test.ts`, ACK lifecycle tests, secret-input test | None for new transitions |
+| VPC EIP/NAT/SNAT | Tagged EIP/NAT, association and source-switch SNAT, bandwidth/tag drift; replacement preserves one final graph | `protocol/connectivity.test.ts` persisted stack with actual SDK wire | None |
+| RAM Role/Policy/Attachment + RRSA | Scoped OIDC trust, role policy, custom default policy versions, version-limit rotation, drift repair, ordered delete | `protocol/ram.test.ts` persisted stack with RAM wire format | None |
+| ACR Image | Upstream Docker build/push, temporary credentials, registry-observed digest; remote tags retained | `acr/image.test.ts` fake Docker and SDK | None |
+| RDS backup/parameters/maintenance/restore | Instance-owned configuration, pending-restart reporting, separate clone target | `protocol/instance-updates.test.ts` persisted state, actual SDK requests | None |
+| ECS mutable size/groups + full rules | Graceful resize, join before leave; IPv4/IPv6/group ingress and egress | `protocol/ecs.test.ts` | None |
+| ECS KeyPair/Disk/Attachment | Public-key import, independent growable disk, retain across VM replacement | `protocol/ecs.test.ts` persisted replacement/reattachment | None |
+
+New account-wide enumeration is implemented for EIP, NAT, disk, key pair and
+RAM role. RAM policy and relationship resources return no account-wide items.
+Do not infer nuke support from creation support. Deletion is state-driven, with
+attribute dependencies ordering children before parents. No resource here
+force-detaches unrelated bindings or changes account-level ownership policy.
+
+Enhanced Internet NAT owns its automatically created default VPC route; a
+separate Route resource would duplicate that ownership in the current topology.
+RRSA uses the OIDC provider created by ACK. RDS backup/parameters are settings
+on the instance rather than AWS-shaped child resources. Other Kubernetes kinds
+use upstream providers, as documented in COMPOSITION.md.

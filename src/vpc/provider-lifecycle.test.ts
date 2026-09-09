@@ -25,19 +25,26 @@ import {
 } from "../tair/instance.ts";
 import { Network, NetworkProvider } from "./network.ts";
 import { VSwitch, VSwitchProvider } from "./vswitch.ts";
-
-const vpcTags = (tags: readonly { key?: string; value?: string }[]) =>
+const vpcTags = (
+  tags: readonly {
+    key?: string;
+    value?: string;
+  }[],
+) =>
   new VPC.DescribeVpcsResponseBodyVpcsVpcTags({
     tag: tags.map((tag) => new VPC.DescribeVpcsResponseBodyVpcsVpcTagsTag(tag)),
   });
-
-const vSwitchTags = (tags: readonly { key?: string; value?: string }[]) =>
+const vSwitchTags = (
+  tags: readonly {
+    key?: string;
+    value?: string;
+  }[],
+) =>
   new VPC.DescribeVSwitchAttributesResponseBodyTags({
     tag: tags.map(
       (tag) => new VPC.DescribeVSwitchAttributesResponseBodyTagsTag(tag),
     ),
   });
-
 class StatefulVPCClient extends VPCClient {
   readonly transientFailures = new TestTransientFailures();
   network: VPC.DescribeVpcsResponseBodyVpcsVpc | undefined;
@@ -70,11 +77,9 @@ class StatefulVPCClient extends VPCClient {
   vSwitchDeleteErrors: string[] = [];
   vSwitchDeleteRequestIds: string[] = [];
   vSwitchReadsUntilAbsent = 0;
-
   constructor() {
     super(testConfig());
   }
-
   override async describeVpcs(
     request: VPC.DescribeVpcsRequest,
   ): Promise<VPC.DescribeVpcsResponse> {
@@ -129,7 +134,6 @@ class StatefulVPCClient extends VPCClient {
       }),
     });
   }
-
   override async createVpc(
     request: VPC.CreateVpcRequest,
   ): Promise<VPC.CreateVpcResponse> {
@@ -160,7 +164,6 @@ class StatefulVPCClient extends VPCClient {
       body: new VPC.CreateVpcResponseBody({ vpcId: "vpc-test" }),
     });
   }
-
   override async modifyVpcAttribute(
     request: VPC.ModifyVpcAttributeRequest,
   ): Promise<VPC.ModifyVpcAttributeResponse> {
@@ -180,7 +183,6 @@ class StatefulVPCClient extends VPCClient {
     }
     return new VPC.ModifyVpcAttributeResponse({ statusCode: 200 });
   }
-
   override async describeVSwitches(
     request: VPC.DescribeVSwitchesRequest,
   ): Promise<VPC.DescribeVSwitchesResponse> {
@@ -206,7 +208,6 @@ class StatefulVPCClient extends VPCClient {
       }),
     });
   }
-
   override async describeVSwitchAttributes(
     request: VPC.DescribeVSwitchAttributesRequest,
   ): Promise<VPC.DescribeVSwitchAttributesResponse> {
@@ -224,7 +225,6 @@ class StatefulVPCClient extends VPCClient {
       body,
     });
   }
-
   override async createVSwitch(
     request: VPC.CreateVSwitchRequest,
   ): Promise<VPC.CreateVSwitchResponse> {
@@ -262,7 +262,6 @@ class StatefulVPCClient extends VPCClient {
       this.vSwitchCreatesInFlight -= 1;
     }
   }
-
   override async modifyVSwitchAttribute(
     request: VPC.ModifyVSwitchAttributeRequest,
   ): Promise<VPC.ModifyVSwitchAttributeResponse> {
@@ -276,7 +275,6 @@ class StatefulVPCClient extends VPCClient {
     }
     return new VPC.ModifyVSwitchAttributeResponse({ statusCode: 200 });
   }
-
   override async tagResources(
     request: VPC.TagResourcesRequest,
   ): Promise<VPC.TagResourcesResponse> {
@@ -318,7 +316,6 @@ class StatefulVPCClient extends VPCClient {
     }
     return new VPC.TagResourcesResponse({ statusCode: 200 });
   }
-
   override async unTagResources(
     request: VPC.UnTagResourcesRequest,
   ): Promise<VPC.UnTagResourcesResponse> {
@@ -345,7 +342,6 @@ class StatefulVPCClient extends VPCClient {
     }
     return new VPC.UnTagResourcesResponse({ statusCode: 200 });
   }
-
   override async deleteVSwitch(
     _request: VPC.DeleteVSwitchRequest,
   ): Promise<VPC.DeleteVSwitchResponse> {
@@ -366,7 +362,6 @@ class StatefulVPCClient extends VPCClient {
     this.vSwitch = undefined;
     return new VPC.DeleteVSwitchResponse({ statusCode: 200 });
   }
-
   override async deleteVpc(
     _request: VPC.DeleteVpcRequest,
   ): Promise<VPC.DeleteVpcResponse> {
@@ -375,19 +370,18 @@ class StatefulVPCClient extends VPCClient {
     const code = this.networkDeleteErrors.shift();
     if (code !== undefined) {
       const requestId = this.networkDeleteRequestIds.shift();
-      throw Object.assign(
-        new Error("VPC still holds a managed dependency"),
-        { code, requestId, statusCode: 400 },
-      );
+      throw Object.assign(new Error("VPC still holds a managed dependency"), {
+        code,
+        requestId,
+        statusCode: 400,
+      });
     }
     this.network = undefined;
     return new VPC.DeleteVpcResponse({ statusCode: 200 });
   }
 }
-
 const providerLayer = (client: StatefulVPCClient) =>
   Layer.succeed(AlibabaClients, testClientSet({ vpc: client }));
-
 describe("VPC provider lifecycles", () => {
   it("does not call VPC when an interrupted vSwitch has no VPC identity", async () => {
     const fake = new StatefulVPCClient();
@@ -402,7 +396,6 @@ describe("VPC provider lifecycles", () => {
         output: undefined,
       });
     });
-
     await expect(
       Effect.runPromise(
         program.pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
@@ -410,7 +403,6 @@ describe("VPC provider lifecycles", () => {
     ).resolves.toBeUndefined();
     expect(fake.vSwitchReads).toBe(0);
   });
-
   it("creates, updates, and deletes a network after a transient failure", async () => {
     const fake = new StatefulVPCClient();
     const layer = NetworkProvider({ wait: { attempts: 2, interval: 0 } }).pipe(
@@ -420,15 +412,14 @@ describe("VPC provider lifecycles", () => {
     const initial = {
       name: "example-vpc",
       cidrBlock: "10.0.0.0/16",
-      modify: { description: "Example dev", enableDnsHostname: true },
+      description: "Example dev",
+      enableDnsHostname: true,
       tags: { environment: "dev" },
     };
     const changed = {
       ...initial,
-      modify: {
-        description: "Example disposable test",
-        enableDnsHostname: true,
-      },
+      description: "Example disposable test",
+      enableDnsHostname: true,
       tags: { environment: "test" },
     };
     const program = Effect.gen(function* () {
@@ -452,7 +443,6 @@ describe("VPC provider lifecycles", () => {
       yield* provider.delete({ ...base, olds: changed, output: updated });
       return { updated, observed };
     });
-
     const result = await Effect.runPromise(
       program.pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
     );
@@ -465,11 +455,10 @@ describe("VPC provider lifecycles", () => {
     });
     expect(result.observed).toEqual(result.updated);
     expect(fake.networkCreates).toBe(1);
-    expect(fake.networkModifies).toBe(2);
+    expect(fake.networkModifies).toBe(1);
     expect(fake.networkDeletes).toBe(2);
     expect(fake.network).toBeUndefined();
   });
-
   it("retries a tokenized VPC create after a connection timeout", async () => {
     const fake = new StatefulVPCClient();
     fake.networkCreateErrors.push("ConnectTimeout");
@@ -477,7 +466,6 @@ describe("VPC provider lifecycles", () => {
       Layer.provide(providerLayer(fake)),
     );
     const base = resourceBase("vpc-transient-create");
-
     const created = await Effect.runPromise(
       Effect.gen(function* () {
         const provider = yield* Network.Provider;
@@ -493,14 +481,12 @@ describe("VPC provider lifecycles", () => {
         });
       }).pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
     );
-
     expect(created.vpcId).toBe("vpc-test");
     expect(fake.networkCreates).toBe(2);
     expect(fake.networkClientTokens).toEqual([
       `create-${base.instanceId}`,
       `create-${base.instanceId}`,
     ]);
-
     fake.network = undefined;
     const replacementBase = {
       ...base,
@@ -528,7 +514,6 @@ describe("VPC provider lifecycles", () => {
       fake.networkClientTokens[0],
     );
   });
-
   it("does not mistake a configuring VPC for an in-flight delete", async () => {
     const fake = new StatefulVPCClient();
     fake.network = new VPC.DescribeVpcsResponseBodyVpcsVpc({
@@ -542,7 +527,6 @@ describe("VPC provider lifecycles", () => {
     );
     const base = resourceBase("vpc-pending-delete");
     const olds = { name: "example-vpc", cidrBlock: "10.0.0.0/16" };
-
     await Effect.runPromise(
       Effect.gen(function* () {
         const provider = yield* Network.Provider;
@@ -563,7 +547,6 @@ describe("VPC provider lifecycles", () => {
     expect(fake.networkDeletes).toBe(1);
     expect(fake.network).toBeUndefined();
   });
-
   it("resumes an already-deleting VPC without issuing delete again", async () => {
     const fake = new StatefulVPCClient();
     fake.network = new VPC.DescribeVpcsResponseBodyVpcsVpc({
@@ -577,7 +560,6 @@ describe("VPC provider lifecycles", () => {
       Layer.provide(providerLayer(fake)),
     );
     const base = resourceBase("vpc-deleting-delete");
-
     await Effect.runPromise(
       Effect.gen(function* () {
         const provider = yield* Network.Provider;
@@ -597,7 +579,6 @@ describe("VPC provider lifecycles", () => {
     );
     expect(fake.networkDeletes).toBe(0);
   });
-
   it("enumerates every VPC across pages for account-wide teardown", async () => {
     const fake = new StatefulVPCClient();
     // 120 VPCs across a 50-per-page inventory: a provider that reads only the
@@ -614,14 +595,12 @@ describe("VPC provider lifecycles", () => {
         }),
     );
     const layer = NetworkProvider().pipe(Layer.provide(providerLayer(fake)));
-
     const listed = await Effect.runPromise(
       Effect.gen(function* () {
         const provider = yield* Network.Provider;
         return yield* provider.list();
       }).pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
     );
-
     expect(listed).toHaveLength(120);
     expect(listed.map((network) => network.vpcId)).toContain("vpc-119");
     // Attributes are the same shape `read` emits, so each item is directly
@@ -633,14 +612,11 @@ describe("VPC provider lifecycles", () => {
       status: "Available",
     });
   });
-
   it("orders account-wide teardown so a VPC outlives everything inside it", async () => {
     const fake = new StatefulVPCClient();
-    const layer = Layer.mergeAll(
-      NetworkProvider(),
-      VSwitchProvider(),
-    ).pipe(Layer.provide(providerLayer(fake)));
-
+    const layer = Layer.mergeAll(NetworkProvider(), VSwitchProvider()).pipe(
+      Layer.provide(providerLayer(fake)),
+    );
     const { network, vswitch } = await Effect.runPromise(
       Effect.gen(function* () {
         return {
@@ -649,7 +625,6 @@ describe("VPC provider lifecycles", () => {
         };
       }).pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
     );
-
     // `A.dependsOn = [B]` means every A is gone before any B deletes, so the
     // *child* names the parent it needs to outlive it.
     expect(vswitch.nuke?.dependsOn).toEqual(["Alibaba.VPC.Network"]);
@@ -657,7 +632,6 @@ describe("VPC provider lifecycles", () => {
     // its children here would invert teardown and delete the VPC first.
     expect(network.nuke?.dependsOn ?? []).toEqual([]);
   });
-
   it("orders in-VPC services ahead of both the subnet and the VPC", async () => {
     // Each service's teardown needs its network to still be there, so all of
     // them declare the whole VPC namespace. Asserted here rather than in each
@@ -669,7 +643,6 @@ describe("VPC provider lifecycles", () => {
       RDSInstanceProvider(),
       TairInstanceProvider(),
     ).pipe(Layer.provide(providerLayer(new StatefulVPCClient())));
-
     const providers = await Effect.runPromise(
       Effect.gen(function* () {
         return {
@@ -680,7 +653,6 @@ describe("VPC provider lifecycles", () => {
         };
       }).pipe(Effect.provide(layers), Effect.provide(alchemyTestRuntime)),
     );
-
     expect(providers.cluster.nuke?.dependsOn).toEqual(["Alibaba.VPC.*"]);
     expect(providers.rds.nuke?.dependsOn).toEqual(["Alibaba.VPC.*"]);
     expect(providers.tair.nuke?.dependsOn).toEqual(["Alibaba.VPC.*"]);
@@ -690,7 +662,6 @@ describe("VPC provider lifecycles", () => {
       "Alibaba.VPC.*",
     ]);
   });
-
   it("deletes a VPC through managed dependency failures left by ACK", async () => {
     const fake = new StatefulVPCClient();
     fake.network = new VPC.DescribeVpcsResponseBodyVpcsVpc({
@@ -711,7 +682,6 @@ describe("VPC provider lifecycles", () => {
       deleteDependencyWait: { attempts: 8, interval: 0 },
     }).pipe(Layer.provide(providerLayer(fake)));
     const base = resourceBase("vpc-dependency-delete");
-
     await Effect.runPromise(
       Effect.gen(function* () {
         const provider = yield* Network.Provider;
@@ -733,7 +703,6 @@ describe("VPC provider lifecycles", () => {
     expect(fake.networkDeletes).toBe(4);
     expect(fake.network).toBeUndefined();
   });
-
   it("reports the blocking dependency when a VPC never becomes deletable", async () => {
     const fake = new StatefulVPCClient();
     fake.network = new VPC.DescribeVpcsResponseBodyVpcsVpc({
@@ -752,7 +721,6 @@ describe("VPC provider lifecycles", () => {
       deleteDependencyWait: { attempts: 3, interval: 0 },
     }).pipe(Layer.provide(providerLayer(fake)));
     const base = resourceBase("vpc-dependency-blocked");
-
     const program = Effect.gen(function* () {
       const provider = yield* Network.Provider;
       yield* provider.delete({
@@ -768,7 +736,6 @@ describe("VPC provider lifecycles", () => {
         },
       });
     });
-
     // The named dependency is reported, not a bare readiness timeout.
     await expect(
       Effect.runPromise(
@@ -783,7 +750,6 @@ describe("VPC provider lifecycles", () => {
     // State is retained: the VPC is still there to retry against.
     expect(fake.network).toBeDefined();
   });
-
   it("rides out a readiness read that outlived the per-call retry budget", async () => {
     const fake = new StatefulVPCClient();
     // Call 1 is reconcile's bare pre-create observation; the create then
@@ -795,7 +761,6 @@ describe("VPC provider lifecycles", () => {
       wait: { attempts: 6, interval: 0 },
     }).pipe(Layer.provide(providerLayer(fake)));
     const base = resourceBase("vpc-read-blip");
-
     const created = await Effect.runPromise(
       Effect.gen(function* () {
         const provider = yield* Network.Provider;
@@ -807,14 +772,12 @@ describe("VPC provider lifecycles", () => {
         });
       }).pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
     );
-
     // The blips cost observation attempts, not the whole deploy — and no
     // second VPC was built.
     expect(created.vpcId).toBe("vpc-test");
     expect(fake.networkCreates).toBe(1);
     expect(fake.networkReadCalls).toBeGreaterThan(3);
   });
-
   it("aborts a readiness wait when the read is rejected outright", async () => {
     const fake = new StatefulVPCClient();
     // A rejected read inside the readiness wait; repeating it cannot change
@@ -833,7 +796,6 @@ describe("VPC provider lifecycles", () => {
         output: undefined,
       });
     });
-
     await expect(
       Effect.runPromise(
         program.pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
@@ -844,7 +806,6 @@ describe("VPC provider lifecycles", () => {
     });
     expect(fake.networkReadCalls).toBe(2);
   });
-
   it("deletes a vSwitch through transient and managed dependency failures", async () => {
     const fake = new StatefulVPCClient();
     const layer = VSwitchProvider({
@@ -857,12 +818,12 @@ describe("VPC provider lifecycles", () => {
       name: "example-vswitch-a",
       cidrBlock: "10.0.0.0/24",
       zoneId: "ap-southeast-5a",
-      modify: { description: "Example dev" },
+      description: "Example dev",
       tags: { environment: "dev" },
     };
     const changed = {
       ...initial,
-      modify: { description: "Example disposable test" },
+      description: "Example disposable test",
       tags: { environment: "test" },
     };
     const program = Effect.gen(function* () {
@@ -887,7 +848,6 @@ describe("VPC provider lifecycles", () => {
       yield* provider.delete({ ...base, olds: changed, output: updated });
       return { updated, observed };
     });
-
     const result = await Effect.runPromise(
       program.pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
     );
@@ -901,11 +861,10 @@ describe("VPC provider lifecycles", () => {
     expect(result.observed).toEqual(result.updated);
     expect(fake.vSwitchCreates).toBe(1);
     expect(fake.vSwitchClientTokens).toEqual([`create-${base.instanceId}`]);
-    expect(fake.vSwitchModifies).toBe(2);
+    expect(fake.vSwitchModifies).toBe(1);
     expect(fake.vSwitchDeletes).toBe(3);
     expect(fake.vSwitch).toBeUndefined();
   });
-
   it("serializes concurrent vSwitch creates within one VPC", async () => {
     const fake = new StatefulVPCClient();
     fake.vSwitchCreateDelayMs = 20;
@@ -952,14 +911,12 @@ describe("VPC provider lifecycles", () => {
         { concurrency: "unbounded" },
       );
     });
-
     await Effect.runPromise(
       program.pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
     );
     expect(fake.vSwitchCreates).toBe(2);
     expect(fake.vSwitchMaxConcurrentCreates).toBe(1);
   });
-
   it("retries the documented bare dependency violation", async () => {
     const fake = new StatefulVPCClient();
     fake.vSwitch = new VPC.DescribeVSwitchAttributesResponseBody({
@@ -982,7 +939,6 @@ describe("VPC provider lifecycles", () => {
       cidrBlock: "10.0.0.0/24",
       zoneId: "ap-southeast-5a",
     };
-
     await Effect.runPromise(
       Effect.gen(function* () {
         const provider = yield* VSwitch.Provider;
@@ -999,11 +955,9 @@ describe("VPC provider lifecycles", () => {
         });
       }).pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
     );
-
     expect(fake.vSwitchDeletes).toBe(2);
     expect(fake.vSwitch).toBeUndefined();
   });
-
   it("waits for a deleted Tair instance to release its vSwitch", async () => {
     const fake = new StatefulVPCClient();
     fake.vSwitch = new VPC.DescribeVSwitchAttributesResponseBody({
@@ -1026,7 +980,6 @@ describe("VPC provider lifecycles", () => {
       cidrBlock: "10.0.0.0/24",
       zoneId: "ap-southeast-5b",
     };
-
     await Effect.runPromise(
       Effect.gen(function* () {
         const provider = yield* VSwitch.Provider;
@@ -1043,11 +996,9 @@ describe("VPC provider lifecycles", () => {
         });
       }).pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
     );
-
     expect(fake.vSwitchDeletes).toBe(2);
     expect(fake.vSwitch).toBeUndefined();
   });
-
   it("does not retry a permanent vSwitch dependency", async () => {
     const fake = new StatefulVPCClient();
     fake.vSwitch = new VPC.DescribeVSwitchAttributesResponseBody({
@@ -1084,7 +1035,6 @@ describe("VPC provider lifecycles", () => {
         },
       });
     });
-
     await expect(
       Effect.runPromise(
         program.pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
@@ -1095,7 +1045,6 @@ describe("VPC provider lifecycles", () => {
     });
     expect(fake.vSwitchDeletes).toBe(1);
   });
-
   it("reports the last retryable vSwitch dependency when the wait expires", async () => {
     const fake = new StatefulVPCClient();
     fake.vSwitch = new VPC.DescribeVSwitchAttributesResponseBody({
@@ -1136,7 +1085,6 @@ describe("VPC provider lifecycles", () => {
         },
       });
     });
-
     await expect(
       Effect.runPromise(
         program.pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
@@ -1152,7 +1100,6 @@ describe("VPC provider lifecycles", () => {
     });
     expect(fake.vSwitchDeletes).toBe(2);
   });
-
   it("resumes an already-pending vSwitch delete without issuing it again", async () => {
     const fake = new StatefulVPCClient();
     fake.vSwitch = new VPC.DescribeVSwitchAttributesResponseBody({
@@ -1175,7 +1122,6 @@ describe("VPC provider lifecycles", () => {
       cidrBlock: "10.0.0.0/24",
       zoneId: "ap-southeast-5a",
     };
-
     await Effect.runPromise(
       Effect.gen(function* () {
         const provider = yield* VSwitch.Provider;
@@ -1192,7 +1138,6 @@ describe("VPC provider lifecycles", () => {
         });
       }).pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
     );
-
     expect(fake.vSwitchDeletes).toBe(0);
   });
 });

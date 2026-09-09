@@ -16,7 +16,7 @@ instance IP must exist before the dependent RDS/Tair allowlists can be created.
 Required inputs are image ID, instance type, vSwitch ID, and security group IDs.
 Image availability and architecture must match the selected region and SKU.
 The system disk defaults to 40 GiB ESSD. Select an image-supported disk size.
-Key-pair names refer to existing regional SSH keys; the provider never creates
+Key-pair names refer to existing regional SSH keys or `ECS.KeyPair` public-key imports; the provider never creates
 or returns a private key. RAM role names refer to existing instance roles.
 
 `userData` is a redacted UTF-8 cloud-init document or script. The provider
@@ -24,11 +24,13 @@ Base64-encodes it for the API. Do not supply already-encoded content. Redaction
 prevents accidental display, not persistence: keep state private and avoid
 embedding long-lived application credentials in bootstrap data.
 
-Changes to image, VM size, vSwitch, security-group membership, system-disk
-settings, key pair, RAM role, public bandwidth, name, or user data replace the
-instance. Replacement deletes the old VM and its system disk before creating
-the new one; keep anything that must persist in external storage. This version does not resize a running VM or rerun cloud-init in place.
-Description, tags, deletion protection, and auto-release schedule update in place.
+Changes to image, vSwitch, system-disk settings, key pair, RAM role, name,
+or user data replace the instance. Replacement deletes the old VM and its
+system disk before creating the new one; use an independent `ECS.Disk` for
+retained data. Type changes gracefully stop, resize and restart the VM. Security
+group changes join desired groups before leaving old groups. Public bandwidth,
+description, tags, deletion protection and auto-release schedule update in place.
+Cloud-init does not rerun during an in-place resize.
 A stopped VM is restarted on reapply. A Running status does not establish
 application health, and this is not a continuously running recovery controller.
 
@@ -69,12 +71,13 @@ need existing outbound networking or an explicit public bandwidth setting.
 
 Security groups are normal VPC groups with Alibaba's default policies. The
 provider does not claim deny-all egress or isolation among members of the same
-group. `SecurityGroupIngress` manages one IPv4 inbound allow rule with protocol,
-port range, CIDR and priority. Other rules remain unmanaged. It adopts identical
+group. `SecurityGroupIngress` and `SecurityGroupEgress` each manage one rule with
+protocol, port range, priority, accept/drop policy and exactly one IPv4, IPv6
+or security-group peer. Other rules remain unmanaged. It adopts identical
 rules by their compound identity and deletes the observed rule ID. Do not share
 ownership of the same rule between stacks. External edits to a saved rule fail
 explicitly; restore or remove it before reapplying to avoid leaving unintended
-access. This version has no custom egress, IPv6 or source-group rule resource.
+access. Ingress and egress are independent resources with the same rule-ownership contract.
 
 ## Teardown and retention
 
@@ -83,9 +86,11 @@ a reviewed deployment first. It waits through transitional states, requests a
 graceful stop, then deletes without forced shutdown and waits for instance absence.
 A stuck shutdown fails within the wait budget; state is retained for recovery.
 The instance-created system disk and instance-bound public IP follow ECS release
-semantics. This provider does not create independent EIPs, extra data disks,
-ENIs, snapshots, or backup policies, and does not delete externally attached
-resources. Inventory those separately if someone adds them to a managed VM.
+semantics. `VPC.Eip` and `ECS.Disk` have independent lifecycles.
+`ECS.DiskAttachment` sets `deleteWithInstance: false` and detaches before disk
+deletion; VM replacement can reattach the retained disk. Disk growth does not
+resize the guest filesystem. ENIs, snapshots and externally attached resources
+remain outside this VM resource. Inventory those separately if someone adds them to a managed VM.
 Never interpret instance absence as proof that every account-side charge stopped.
 
 Persist state outside an ephemeral worktree. The tagged resources support regional

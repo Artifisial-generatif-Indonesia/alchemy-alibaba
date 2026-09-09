@@ -23,6 +23,7 @@ The exact versions pinned by this repository are:
 
 | Service | Package | Version |
 | --- | --- | --- |
+| RAM | `@alicloud/ram20150501` | `1.3.0` |
 | ECS | `@alicloud/ecs20140526` | `7.11.2` |
 | VPC | `@alicloud/vpc20160428` | `7.2.5` |
 | ACK | `@alicloud/cs20151215` | `7.2.0` |
@@ -34,7 +35,9 @@ Generated properties are optional even when their documentation says
 "required." The provider therefore encodes unconditional required inputs in
 its own resource types and supplies the configured provider region when the
 request omits `regionId`. Conditional product rules remain available through
-the full generated request surface and must be validated by Alibaba.
+the supported generated request fields and must be validated by Alibaba.
+RDS resize inputs are narrowed to fields with observed convergence; deferred
+changes are rejected. See COMPOSITION.md for the desired-state contract without 0.1.0 aliases.
 
 ## Lifecycle coverage
 
@@ -212,3 +215,12 @@ contract and the additional protocol tests in `src/protocol/ecs.test.ts`. ECS
 request construction is explicit: raw SDK extras cannot enable batch purchases,
 subscriptions, inherited passwords, extra disks or independent public IPs.
 ECS live validation remains pending.
+
+## 0.2.0 review additions
+
+The additional lifecycle contracts and local evidence for ACK credentials,
+Kubernetes Secrets, EIP/NAT/SNAT, RAM/RRSA, ACR images, RDS backup/parameters/restore
+and independent ECS disks/keys/rules are recorded in SUPPORT-MATRIX.md and
+COMPOSITION.md. These additions have no connected acceptance evidence. Their SDK
+models define wire serialization; loopback tests cannot establish regional
+availability, account permissions, billing, backup validity or guest readiness.

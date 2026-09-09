@@ -17,7 +17,6 @@ import {
   SecurityIpGroup,
   SecurityIpGroupProvider,
 } from "./security-ip-group.ts";
-
 class StatefulTairClient extends TairClient {
   readonly transientFailures = new TestTransientFailures();
   instance:
@@ -56,11 +55,9 @@ class StatefulTairClient extends TairClient {
   lastPasswordResetAccount: string | undefined;
   accountDeletes = 0;
   securityGroupModifies = 0;
-
   constructor() {
     super(testConfig());
   }
-
   override async describeInstanceAttribute(
     request: Tair.DescribeInstanceAttributeRequest,
   ): Promise<Tair.DescribeInstanceAttributeResponse> {
@@ -104,7 +101,6 @@ class StatefulTairClient extends TairClient {
       }),
     });
   }
-
   override async describeInstances(
     _request: Tair.DescribeInstancesRequest,
   ): Promise<Tair.DescribeInstancesResponse> {
@@ -134,7 +130,6 @@ class StatefulTairClient extends TairClient {
       }),
     });
   }
-
   override async describeInstancesOverview(
     request: Tair.DescribeInstancesOverviewRequest,
   ): Promise<Tair.DescribeInstancesOverviewResponse> {
@@ -171,7 +166,6 @@ class StatefulTairClient extends TairClient {
       }),
     });
   }
-
   override async createInstance(
     request: Tair.CreateInstanceRequest,
   ): Promise<Tair.CreateInstanceResponse> {
@@ -228,7 +222,6 @@ class StatefulTairClient extends TairClient {
       body: new Tair.CreateInstanceResponseBody({ instanceId: "r-test" }),
     });
   }
-
   override async describeInstanceSSL(
     _request: Tair.DescribeInstanceSSLRequest,
   ): Promise<Tair.DescribeInstanceSSLResponse> {
@@ -237,7 +230,6 @@ class StatefulTairClient extends TairClient {
       body: this.instance === undefined ? undefined : this.ssl,
     });
   }
-
   override async describeInstanceConfig(
     _request: Tair.DescribeInstanceConfigRequest,
   ): Promise<Tair.DescribeInstanceConfigResponse> {
@@ -251,7 +243,6 @@ class StatefulTairClient extends TairClient {
             }),
     });
   }
-
   override async modifyInstanceConfig(
     request: Tair.ModifyInstanceConfigRequest,
   ): Promise<Tair.ModifyInstanceConfigResponse> {
@@ -260,7 +251,6 @@ class StatefulTairClient extends TairClient {
     this.config = JSON.stringify({ EvictionPolicy: desired });
     return new Tair.ModifyInstanceConfigResponse({ statusCode: 200 });
   }
-
   override async modifyInstanceAttribute(
     request: Tair.ModifyInstanceAttributeRequest,
   ): Promise<Tair.ModifyInstanceAttributeResponse> {
@@ -279,7 +269,6 @@ class StatefulTairClient extends TairClient {
     }
     return new Tair.ModifyInstanceAttributeResponse({ statusCode: 200 });
   }
-
   override async modifyInstanceSpec(
     request: Tair.ModifyInstanceSpecRequest,
   ): Promise<Tair.ModifyInstanceSpecResponse> {
@@ -308,7 +297,6 @@ class StatefulTairClient extends TairClient {
     }
     return new Tair.ModifyInstanceSpecResponse({ statusCode: 200 });
   }
-
   override async modifyInstanceSSL(
     request: Tair.ModifyInstanceSSLRequest,
   ): Promise<Tair.ModifyInstanceSSLResponse> {
@@ -318,7 +306,6 @@ class StatefulTairClient extends TairClient {
     });
     return new Tair.ModifyInstanceSSLResponse({ statusCode: 200 });
   }
-
   override async modifyInstanceVpcAuthMode(
     request: Tair.ModifyInstanceVpcAuthModeRequest,
   ): Promise<Tair.ModifyInstanceVpcAuthModeResponse> {
@@ -334,7 +321,6 @@ class StatefulTairClient extends TairClient {
     }
     return new Tair.ModifyInstanceVpcAuthModeResponse({ statusCode: 200 });
   }
-
   override async tagResources(
     request: Tair.TagResourcesRequest,
   ): Promise<Tair.TagResourcesResponse> {
@@ -370,7 +356,6 @@ class StatefulTairClient extends TairClient {
     }
     return new Tair.TagResourcesResponse({ statusCode: 200 });
   }
-
   override async untagResources(
     request: Tair.UntagResourcesRequest,
   ): Promise<Tair.UntagResourcesResponse> {
@@ -392,7 +377,6 @@ class StatefulTairClient extends TairClient {
     }
     return new Tair.UntagResourcesResponse({ statusCode: 200 });
   }
-
   override async deleteInstance(
     _request: Tair.DeleteInstanceRequest,
   ): Promise<Tair.DeleteInstanceResponse> {
@@ -406,7 +390,6 @@ class StatefulTairClient extends TairClient {
     }
     return new Tair.DeleteInstanceResponse({ statusCode: 200 });
   }
-
   override async destroyInstance(
     _request: Tair.DestroyInstanceRequest,
   ): Promise<Tair.DestroyInstanceResponse> {
@@ -415,7 +398,6 @@ class StatefulTairClient extends TairClient {
     this.instance = undefined;
     return new Tair.DestroyInstanceResponse({ statusCode: 200 });
   }
-
   override async describeAccounts(
     request: Tair.DescribeAccountsRequest,
   ): Promise<Tair.DescribeAccountsResponse> {
@@ -433,7 +415,6 @@ class StatefulTairClient extends TairClient {
       }),
     });
   }
-
   override async createAccount(
     request: Tair.CreateAccountRequest,
   ): Promise<Tair.CreateAccountResponse> {
@@ -462,7 +443,6 @@ class StatefulTairClient extends TairClient {
     }
     return new Tair.CreateAccountResponse({ statusCode: 200 });
   }
-
   override async modifyAccountDescription(
     request: Tair.ModifyAccountDescriptionRequest,
   ): Promise<Tair.ModifyAccountDescriptionResponse> {
@@ -482,7 +462,6 @@ class StatefulTairClient extends TairClient {
     }
     return new Tair.ModifyAccountDescriptionResponse({ statusCode: 200 });
   }
-
   override async resetAccountPassword(
     request: Tair.ResetAccountPasswordRequest,
   ): Promise<Tair.ResetAccountPasswordResponse> {
@@ -490,7 +469,6 @@ class StatefulTairClient extends TairClient {
     this.lastPasswordResetAccount = request.accountName;
     return new Tair.ResetAccountPasswordResponse({ statusCode: 200 });
   }
-
   override async deleteAccount(
     request: Tair.DeleteAccountRequest,
   ): Promise<Tair.DeleteAccountResponse> {
@@ -500,7 +478,6 @@ class StatefulTairClient extends TairClient {
       this.accounts.delete(request.accountName);
     return new Tair.DeleteAccountResponse({ statusCode: 200 });
   }
-
   override async describeSecurityIps(
     _request: Tair.DescribeSecurityIpsRequest,
   ): Promise<Tair.DescribeSecurityIpsResponse> {
@@ -514,7 +491,6 @@ class StatefulTairClient extends TairClient {
       }),
     });
   }
-
   override async modifySecurityIps(
     request: Tair.ModifySecurityIpsRequest,
   ): Promise<Tair.ModifySecurityIpsResponse> {
@@ -557,10 +533,8 @@ class StatefulTairClient extends TairClient {
     return new Tair.ModifySecurityIpsResponse({ statusCode: 200 });
   }
 }
-
 const providerLayer = (fake: StatefulTairClient) =>
   Layer.succeed(AlibabaClients, testClientSet({ tair: fake }));
-
 describe("Tair provider lifecycles", () => {
   it("does not call Tair when an interrupted account has no instance identity", async () => {
     const fake = new StatefulTairClient();
@@ -575,7 +549,6 @@ describe("Tair provider lifecycles", () => {
         output: undefined,
       });
     });
-
     await expect(
       Effect.runPromise(
         program.pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
@@ -583,7 +556,6 @@ describe("Tair provider lifecycles", () => {
     ).resolves.toBeUndefined();
     expect(fake.accountReads).toBe(0);
   });
-
   it("creates, updates, and destroys an instance through transient teardown failures", async () => {
     const fake = new StatefulTairClient();
     const layer = InstanceProvider({ wait: { attempts: 2, interval: 0 } }).pipe(
@@ -593,21 +565,18 @@ describe("Tair provider lifecycles", () => {
     const initial = {
       name: "example-tair",
       password: Redacted.make("OldPassword1!"),
-      create: {
-        instanceClass: "redis.master.small.default",
-        engineVersion: "7.0",
-        networkType: "VPC",
-        vpcId: "vpc-test",
-        vSwitchId: "vsw-test",
-        storage: 20,
-      },
+      instanceClass: "redis.master.small.default",
+      engineVersion: "7.0",
+      networkType: "VPC",
+      vpcId: "vpc-test",
+      vSwitchId: "vsw-test",
       tags: { environment: "dev" },
     };
     const changed = {
       ...initial,
       password: Redacted.make("NewPassword2!"),
       releaseProtection: true,
-      spec: { storage: 40 },
+      storage: 40,
       ssl: "Enable" as const,
       evictionPolicy: "noeviction" as const,
       vpcAuthMode: "Open" as const,
@@ -633,7 +602,6 @@ describe("Tair provider lifecycles", () => {
       yield* provider.delete({ ...base, olds: changed, output: updated });
       return updated;
     });
-
     const updated = await Effect.runPromise(
       program.pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
     );
@@ -660,7 +628,6 @@ describe("Tair provider lifecycles", () => {
     expect(fake.instanceDestroys).toBe(2);
     expect(fake.instance).toBeUndefined();
   });
-
   it("uses a stable token per Tair spec request and rotates it for a later resize", async () => {
     const fake = new StatefulTairClient();
     const layer = InstanceProvider({ wait: { attempts: 2, interval: 0 } }).pipe(
@@ -669,18 +636,14 @@ describe("Tair provider lifecycles", () => {
     const base = resourceBase("tair-spec-token");
     const initial = {
       name: "example-tair-token",
-      create: {
-        instanceClass: "redis.master.small.default",
-        engineVersion: "7.0",
-        networkType: "VPC",
-        vpcId: "vpc-test",
-        vSwitchId: "vsw-test",
-        storage: 20,
-      },
+      instanceClass: "redis.master.small.default",
+      engineVersion: "7.0",
+      networkType: "VPC",
+      vpcId: "vpc-test",
+      vSwitchId: "vsw-test",
     };
-    const firstResize = { ...initial, spec: { storage: 40 } };
-    const secondResize = { ...initial, spec: { storage: 60 } };
-
+    const firstResize = { ...initial, storage: 40 };
+    const secondResize = { ...initial, storage: 60 };
     await Effect.runPromise(
       Effect.gen(function* () {
         const provider = yield* Instance.Provider;
@@ -704,13 +667,11 @@ describe("Tair provider lifecycles", () => {
         });
       }).pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
     );
-
     expect(fake.instanceSpecTokens).toHaveLength(2);
     expect(fake.instanceSpecTokens[0]).toMatch(/^spec-[a-f0-9]{56}$/);
     expect(fake.instanceSpecTokens[1]).toMatch(/^spec-[a-f0-9]{56}$/);
     expect(fake.instanceSpecTokens[1]).not.toBe(fake.instanceSpecTokens[0]);
   });
-
   it("recovers a tokenized Tair create accepted behind an ambiguous response", async () => {
     const fake = new StatefulTairClient();
     fake.instanceCreateErrors.push({
@@ -725,16 +686,14 @@ describe("Tair provider lifecycles", () => {
     const base = resourceBase("tair-ambiguous-create");
     const news = {
       name: "example-tair-ambiguous",
-      create: {
-        instanceType: "Redis",
-        engineVersion: "7.0",
-        instanceClass: "redis.shard.small.2.ce",
-        chargeType: "PostPaid",
-        networkType: "VPC",
-        vpcId: "vpc-test",
-        vSwitchId: "vsw-test",
-        zoneId: "ap-southeast-5b",
-      },
+      instanceType: "Redis",
+      engineVersion: "7.0",
+      instanceClass: "redis.shard.small.2.ce",
+      chargeType: "PostPaid",
+      networkType: "VPC",
+      vpcId: "vpc-test",
+      vSwitchId: "vsw-test",
+      zoneId: "ap-southeast-5b",
     };
     const program = Effect.gen(function* () {
       const provider = yield* Instance.Provider;
@@ -745,7 +704,6 @@ describe("Tair provider lifecycles", () => {
         output: undefined,
       });
     });
-
     await expect(
       Effect.runPromise(
         program.pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
@@ -756,7 +714,6 @@ describe("Tair provider lifecycles", () => {
       "create-provider-test-tair-ambiguous-create",
     ]);
   });
-
   it("recovers a Tair create accepted behind CanNotAcquireLock", async () => {
     const fake = new StatefulTairClient();
     fake.instanceCreateErrors.push({
@@ -771,16 +728,14 @@ describe("Tair provider lifecycles", () => {
     const base = resourceBase("tair-lock-create");
     const news = {
       name: "example-tair-lock",
-      create: {
-        instanceType: "Redis",
-        engineVersion: "7.0",
-        instanceClass: "redis.shard.small.2.ce",
-        chargeType: "PostPaid",
-        networkType: "VPC",
-        vpcId: "vpc-test",
-        vSwitchId: "vsw-test",
-        zoneId: "ap-southeast-5b",
-      },
+      instanceType: "Redis",
+      engineVersion: "7.0",
+      instanceClass: "redis.shard.small.2.ce",
+      chargeType: "PostPaid",
+      networkType: "VPC",
+      vpcId: "vpc-test",
+      vSwitchId: "vsw-test",
+      zoneId: "ap-southeast-5b",
     };
     const program = Effect.gen(function* () {
       const provider = yield* Instance.Provider;
@@ -791,7 +746,6 @@ describe("Tair provider lifecycles", () => {
         output: undefined,
       });
     });
-
     await expect(
       Effect.runPromise(
         program.pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
@@ -799,7 +753,6 @@ describe("Tair provider lifecycles", () => {
     ).resolves.toMatchObject({ instanceId: "r-test", status: "Normal" });
     expect(fake.instanceCreates).toBe(1);
   });
-
   it("preserves list identity when creating attributes are incomplete", async () => {
     const fake = new StatefulTairClient();
     const layer = InstanceProvider({ wait: { attempts: 2, interval: 0 } }).pipe(
@@ -808,14 +761,12 @@ describe("Tair provider lifecycles", () => {
     const base = resourceBase("tair-partial-identity");
     const news = {
       name: "example-tair-partial",
-      create: {
-        instanceType: "Redis",
-        engineVersion: "7.0",
-        instanceClass: "redis.shard.small.2.ce",
-        networkType: "VPC",
-        vpcId: "vpc-test",
-        vSwitchId: "vsw-test",
-      },
+      instanceType: "Redis",
+      engineVersion: "7.0",
+      instanceClass: "redis.shard.small.2.ce",
+      networkType: "VPC",
+      vpcId: "vpc-test",
+      vSwitchId: "vsw-test",
     };
     const program = Effect.gen(function* () {
       const provider = yield* Instance.Provider;
@@ -830,7 +781,6 @@ describe("Tair provider lifecycles", () => {
       if (read === undefined) throw new Error("Tair read is missing");
       return yield* read({ ...base, olds: news, output: created });
     });
-
     await expect(
       Effect.runPromise(
         program.pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
@@ -840,7 +790,6 @@ describe("Tair provider lifecycles", () => {
       name: "example-tair-partial",
     });
   });
-
   it("resumes an already-releasing Tair instance without another delete request", async () => {
     const fake = new StatefulTairClient();
     const layer = InstanceProvider({ wait: { attempts: 2, interval: 0 } }).pipe(
@@ -849,16 +798,14 @@ describe("Tair provider lifecycles", () => {
     const base = resourceBase("tair-resumed-delete");
     const news = {
       name: "example-tair",
-      create: {
-        instanceType: "Redis",
-        engineVersion: "7.0",
-        instanceClass: "redis.master.small.default",
-        chargeType: "PostPaid",
-        networkType: "VPC",
-        vpcId: "vpc-test",
-        vSwitchId: "vsw-test",
-        zoneId: "ap-southeast-5a",
-      },
+      instanceType: "Redis",
+      engineVersion: "7.0",
+      instanceClass: "redis.master.small.default",
+      chargeType: "PostPaid",
+      networkType: "VPC",
+      vpcId: "vpc-test",
+      vSwitchId: "vsw-test",
+      zoneId: "ap-southeast-5a",
     };
     const program = Effect.gen(function* () {
       const provider = yield* Instance.Provider;
@@ -875,7 +822,6 @@ describe("Tair provider lifecycles", () => {
       fake.instanceReadsUntilAbsent = 1;
       yield* provider.delete({ ...base, olds: news, output: created });
     });
-
     await Effect.runPromise(
       program.pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
     );
@@ -883,7 +829,6 @@ describe("Tair provider lifecycles", () => {
     expect(fake.instanceDestroys).toBe(0);
     expect(fake.instance).toBeUndefined();
   });
-
   it("destroys a released Tair instance that normal inventory hides", async () => {
     const fake = new StatefulTairClient();
     const layer = InstanceProvider({ wait: { attempts: 2, interval: 0 } }).pipe(
@@ -892,16 +837,14 @@ describe("Tair provider lifecycles", () => {
     const base = resourceBase("tair-released");
     const news = {
       name: "example-tair-released",
-      create: {
-        instanceType: "Redis",
-        engineVersion: "7.0",
-        instanceClass: "redis.master.small.default",
-        chargeType: "PostPaid",
-        networkType: "VPC",
-        vpcId: "vpc-test",
-        vSwitchId: "vsw-test",
-        zoneId: "ap-southeast-5a",
-      },
+      instanceType: "Redis",
+      engineVersion: "7.0",
+      instanceClass: "redis.master.small.default",
+      chargeType: "PostPaid",
+      networkType: "VPC",
+      vpcId: "vpc-test",
+      vSwitchId: "vsw-test",
+      zoneId: "ap-southeast-5a",
     };
     const program = Effect.gen(function* () {
       const provider = yield* Instance.Provider;
@@ -917,7 +860,6 @@ describe("Tair provider lifecycles", () => {
         );
       yield* provider.delete({ ...base, olds: news, output: created });
     });
-
     await Effect.runPromise(
       program.pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
     );
@@ -925,7 +867,6 @@ describe("Tair provider lifecycles", () => {
     expect(fake.instanceDestroys).toBe(1);
     expect(fake.instance).toBeUndefined();
   });
-
   it("refuses deletion while Tair inventory APIs remain contradictory", async () => {
     const fake = new StatefulTairClient();
     const layer = InstanceProvider({ wait: { attempts: 2, interval: 0 } }).pipe(
@@ -934,16 +875,14 @@ describe("Tair provider lifecycles", () => {
     const base = resourceBase("tair-observation-conflict");
     const news = {
       name: "example-tair-conflict",
-      create: {
-        instanceType: "Redis",
-        engineVersion: "7.0",
-        instanceClass: "redis.master.small.default",
-        chargeType: "PostPaid",
-        networkType: "VPC",
-        vpcId: "vpc-test",
-        vSwitchId: "vsw-test",
-        zoneId: "ap-southeast-5a",
-      },
+      instanceType: "Redis",
+      engineVersion: "7.0",
+      instanceClass: "redis.master.small.default",
+      chargeType: "PostPaid",
+      networkType: "VPC",
+      vpcId: "vpc-test",
+      vSwitchId: "vsw-test",
+      zoneId: "ap-southeast-5a",
     };
     const program = Effect.gen(function* () {
       const provider = yield* Instance.Provider;
@@ -956,7 +895,6 @@ describe("Tair provider lifecycles", () => {
       fake.overviewOnly = true;
       yield* provider.delete({ ...base, olds: news, output: created });
     });
-
     await expect(
       Effect.runPromise(
         program.pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
@@ -976,7 +914,6 @@ describe("Tair provider lifecycles", () => {
     expect(fake.instanceDestroys).toBe(0);
     expect(fake.instance).toBeDefined();
   });
-
   it("creates, updates, rotates, and deletes an account after a transient failure", async () => {
     const fake = new StatefulTairClient();
     const layer = AccountProvider({ wait: { attempts: 2, interval: 0 } }).pipe(
@@ -1019,7 +956,6 @@ describe("Tair provider lifecycles", () => {
       yield* provider.delete({ ...base, olds: changed, output: updated });
       return updated;
     });
-
     await expect(
       Effect.runPromise(
         program.pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
@@ -1031,7 +967,6 @@ describe("Tair provider lifecycles", () => {
     expect(fake.lastPasswordResetAccount).toBe("example_app");
     expect(fake.accountDeletes).toBe(2);
   });
-
   it("covers and deletes a security IP group after a transient failure", async () => {
     const fake = new StatefulTairClient();
     const layer = SecurityIpGroupProvider({
@@ -1063,7 +998,6 @@ describe("Tair provider lifecycles", () => {
       yield* provider.delete({ ...base, olds: changed, output: updated });
       return updated;
     });
-
     const updated = await Effect.runPromise(
       program.pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
     );
@@ -1071,7 +1005,6 @@ describe("Tair provider lifecycles", () => {
     expect(fake.securityGroups.size).toBe(0);
     expect(fake.securityGroupModifies).toBe(4);
   });
-
   it("restores the immutable default security group before deletion", async () => {
     const fake = new StatefulTairClient();
     const layer = SecurityIpGroupProvider({
@@ -1093,7 +1026,6 @@ describe("Tair provider lifecycles", () => {
       });
       yield* provider.delete({ ...base, olds: news, output: created });
     });
-
     await Effect.runPromise(
       program.pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
     );

@@ -20,13 +20,16 @@ import {
 import type { Providers } from "../providers.ts";
 import { missing, unique } from "./internal.ts";
 
-/** An adoptable IPv4 inbound allow rule. Other group rules remain unmanaged. */
+/** One inbound rule. Exactly one source is required; unrelated rules remain unmanaged. */
 export interface SecurityGroupIngressProps {
   readonly securityGroupId: string;
   readonly ipProtocol: "tcp" | "udp" | "icmp" | "all";
   /** ECS format, for example 22/22, 443/443, or -1/-1. */
   readonly portRange: string;
-  readonly sourceCidrIp: string;
+  readonly sourceCidrIp?: string;
+  readonly ipv6SourceCidrIp?: string;
+  readonly sourceGroupId?: string;
+  readonly policy?: "accept" | "drop";
   readonly priority?: number;
 }
 export interface SecurityGroupIngressAttributes
@@ -49,6 +52,9 @@ const normalized = (props: SecurityGroupIngressProps) => ({
   ipProtocol: props.ipProtocol,
   portRange: props.portRange,
   sourceCidrIp: props.sourceCidrIp,
+  ipv6SourceCidrIp: props.ipv6SourceCidrIp,
+  sourceGroupId: props.sourceGroupId,
+  policy: props.policy ?? "accept",
   priority: props.priority ?? 1,
 });
 const matchesRule = (
@@ -56,11 +62,13 @@ const matchesRule = (
   props: SecurityGroupIngressProps,
 ) =>
   value.direction === "ingress" &&
-  value.policy?.toLowerCase() === "accept" &&
+  value.policy?.toLowerCase() === (props.policy ?? "accept") &&
   value.nicType === "intranet" &&
   value.ipProtocol?.toLowerCase() === props.ipProtocol &&
   value.portRange === props.portRange &&
-  value.sourceCidrIp === props.sourceCidrIp &&
+  (value.sourceCidrIp || undefined) === props.sourceCidrIp &&
+  (value.ipv6SourceCidrIp || undefined) === props.ipv6SourceCidrIp &&
+  (value.sourceGroupId || undefined) === props.sourceGroupId &&
   Number(value.priority) === (props.priority ?? 1);
 const drift = () =>
   new AlibabaInvariantError({
@@ -114,11 +122,14 @@ export const SecurityGroupIngressProvider = (
               ruleId !== undefined
                 ? value.securityGroupRuleId === ruleId
                 : value.direction === "ingress" &&
-                  value.policy?.toLowerCase() === "accept" &&
+                  value.policy?.toLowerCase() === (props.policy ?? "accept") &&
                   value.nicType === "intranet" &&
                   value.ipProtocol?.toLowerCase() === props.ipProtocol &&
                   value.portRange === props.portRange &&
-                  value.sourceCidrIp === props.sourceCidrIp &&
+                  (value.sourceCidrIp || undefined) === props.sourceCidrIp &&
+                  (value.ipv6SourceCidrIp || undefined) ===
+                    props.ipv6SourceCidrIp &&
+                  (value.sourceGroupId || undefined) === props.sourceGroupId &&
                   Number(value.priority) === (props.priority ?? 1)
             )
               matches.push(value);
@@ -186,6 +197,19 @@ export const SecurityGroupIngressProvider = (
           return value === undefined ? undefined : yield* attrs(olds, value);
         }),
         reconcile: Effect.fn(function* ({ news, output }) {
+          if (
+            [
+              news.sourceCidrIp,
+              news.ipv6SourceCidrIp,
+              news.sourceGroupId,
+            ].filter((v) => v !== undefined).length !== 1
+          )
+            return yield* new AlibabaInvariantError({
+              resourceType: SecurityGroupIngress.Type,
+              operation: "Validate",
+              message:
+                "Exactly one security group rule source must be specified",
+            });
           yield* requireRegion(
             SecurityGroupIngress.Type,
             clients.regionId,
@@ -205,8 +229,10 @@ export const SecurityGroupIngressProvider = (
                   ipProtocol: news.ipProtocol,
                   portRange: news.portRange,
                   sourceCidrIp: news.sourceCidrIp,
+                  ipv6SourceCidrIp: news.ipv6SourceCidrIp,
+                  sourceGroupId: news.sourceGroupId,
                   priority: String(news.priority ?? 1),
-                  policy: "accept",
+                  policy: news.policy ?? "accept",
                   nicType: "intranet",
                 }),
               ),

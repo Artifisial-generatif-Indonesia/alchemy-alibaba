@@ -52,6 +52,14 @@
     "./ecs": {
       "types": "./dist/ecs/index.d.ts",
       "import": "./dist/ecs/index.js"
+    },
+    "./kubernetes": {
+      "types": "./dist/kubernetes/index.d.ts",
+      "import": "./dist/kubernetes/index.js"
+    },
+    "./ram": {
+      "types": "./dist/ram/index.d.ts",
+      "import": "./dist/ram/index.js"
     }
   },
   "files": [
@@ -63,7 +71,8 @@
     "LIVE-VALIDATION.md",
     "CHANGELOG.md",
     "RELEASE.md",
-    "ECS.md"
+    "ECS.md",
+    "COMPOSITION.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -82,8 +91,10 @@
     "@alicloud/ecs20140526": "7.11.2",
     "@alicloud/openapi-core": "1.0.8",
     "@alicloud/r-kvstore20150101": "6.4.0",
+    "@alicloud/ram20150501": "1.3.0",
     "@alicloud/rds20140815": "15.9.0",
-    "@alicloud/vpc20160428": "7.2.5"
+    "@alicloud/vpc20160428": "7.2.5",
+    "yaml": "2.9.0"
   },
   "peerDependencies": {
     "alchemy": "2.0.0-beta.76",

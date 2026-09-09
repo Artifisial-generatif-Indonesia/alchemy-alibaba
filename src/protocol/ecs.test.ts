@@ -21,6 +21,129 @@ const base = {
 };
 
 describe("ECS real SDK lifecycle", { timeout: 30_000 }, () => {
+  it("preserves an independent disk across VM replacement and imports only a public key", async () => {
+    await withTempDir((directory) =>
+      withProtocolHarness(async ({ server, world }) => {
+        const options = protocolMakeOptions(server.host, directory);
+        const stack = (revision: number) =>
+          protocolStack(
+            "EcsPersistentDisk",
+            options,
+            Effect.gen(function* () {
+              const key = yield* ECS.KeyPair("key", {
+                publicKey:
+                  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakePublicKeyOnly test",
+                tags: revision ? {} : { remove: "yes" },
+              });
+              const disk = yield* ECS.Disk("data", {
+                zoneId: "ap-southeast-5a",
+                size: revision ? 80 : 40,
+                tags: revision ? {} : { remove: "yes" },
+              });
+              const vm = yield* ECS.Instance("vm", {
+                ...base,
+                imageId: revision ? "img-new" : "img-linux",
+                keyPairName: key.name,
+              });
+              yield* ECS.DiskAttachment("mount", {
+                diskId: disk.diskId,
+                instanceId: vm.instanceId,
+              });
+              return { disk: disk.diskId, vm: vm.instanceId, key: key.name };
+            }),
+          );
+        const first = await deployProtocol(options, stack(0));
+        const second = await deployProtocol(options, stack(1));
+        expect(second.disk).toBe(first.disk);
+        expect(second.key).toBe(first.key);
+        expect(second.vm).not.toBe(first.vm);
+        expect(world.ecs.disks.get(first.disk)).toMatchObject({
+          Size: 80,
+          InstanceId: second.vm,
+          DeleteWithInstance: false,
+        });
+        expect(
+          world.ecs.requests.filter((r) => r.action === "CreateDisk"),
+        ).toHaveLength(1);
+        await destroyProtocol(options, stack(1));
+        expect(
+          world.ecs.disks.size +
+            world.ecs.keyPairs.size +
+            world.ecs.instances.size,
+        ).toBe(0);
+      }),
+    );
+  });
+
+  it("resizes in place and changes group membership with IPv6 egress and group ingress", async () => {
+    await withTempDir((directory) =>
+      withProtocolHarness(async ({ server, world }) => {
+        const options = protocolMakeOptions(server.host, directory);
+        const stack = (revision: number) =>
+          protocolStack(
+            "EcsResize",
+            options,
+            Effect.gen(function* () {
+              const first = yield* ECS.SecurityGroup("first", {
+                vpcId: "vpc-test",
+              });
+              const second = yield* ECS.SecurityGroup("second", {
+                vpcId: "vpc-test",
+              });
+              yield* ECS.SecurityGroupIngress("internal", {
+                securityGroupId: first.securityGroupId,
+                sourceGroupId: second.securityGroupId,
+                ipProtocol: "tcp",
+                portRange: "5432/5432",
+              });
+              yield* ECS.SecurityGroupEgress("outbound", {
+                securityGroupId: first.securityGroupId,
+                ipv6DestCidrIp: "2001:db8::/32",
+                ipProtocol: "tcp",
+                portRange: "443/443",
+              });
+              return yield* ECS.Instance("vm", {
+                ...base,
+                instanceType: revision ? "ecs.large" : "ecs.small",
+                securityGroupIds: [
+                  revision ? second.securityGroupId : first.securityGroupId,
+                ],
+              });
+            }),
+          );
+        const first = await deployProtocol(options, stack(0));
+        const second = await deployProtocol(options, stack(1));
+        expect(second.instanceId).toBe(first.instanceId);
+        expect(world.ecs.instances.get(first.instanceId)?.InstanceType).toBe(
+          "ecs.large",
+        );
+        expect(
+          world.ecs.requests.filter((r) => r.action === "RunInstances"),
+        ).toHaveLength(1);
+        const actions = world.ecs.requests.map((r) => r.action);
+        expect(actions.indexOf("JoinSecurityGroup")).toBeLessThan(
+          actions.indexOf("LeaveSecurityGroup"),
+        );
+        expect(actions.indexOf("StopInstance")).toBeLessThan(
+          actions.indexOf("ModifyInstanceSpec"),
+        );
+        expect(
+          [...world.ecs.rules.values()].some(
+            (r) =>
+              r.rule.Direction === "egress" &&
+              r.rule.Ipv6DestCidrIp === "2001:db8::/32",
+          ),
+        ).toBe(true);
+        await destroyProtocol(options, stack(1));
+        expect(
+          world.ecs.rules.size +
+            world.ecs.instances.size +
+            world.ecs.groups.size,
+        ).toBe(0);
+      }),
+    );
+  });
+
   it("persists a VM, ingress and private database access; updates, then removes children before the VM", async () => {
     await withTempDir((directory) =>
       withProtocolHarness(async ({ server, world }) => {

@@ -32,7 +32,6 @@ import {
 import { NodePool, NodePoolProvider } from "./ack/node-pool.ts";
 import { Addon, AddonProvider } from "./ack/addon.ts";
 import { fromSdkError, isNotFound, isTransient } from "./error.ts";
-
 const base = resourceBase("reliability");
 const wait = { attempts: 4, interval: 0 };
 const tags = {
@@ -41,7 +40,7 @@ const tags = {
   "alchemy::id": base.id,
 };
 const tagList = Object.entries(tags).map(([key, value]) => ({ key, value }));
-const create: InstanceProps["create"] = {
+const create: InstanceProps = {
   engine: "PostgreSQL",
   engineVersion: "16.0",
   DBInstanceClass: "test-class",
@@ -50,7 +49,6 @@ const create: InstanceProps["create"] = {
   payType: "Serverless",
   securityIPList: "127.0.0.1",
 };
-
 // Every SDK operation must be supplied explicitly. Unexpected calls throw;
 // these fakes cannot delegate to an SDK or make network requests.
 const strictClient = (methods: Record<string, unknown>) =>
@@ -88,7 +86,6 @@ const run = <A, E, R>(
     ) as Effect.Effect<A, E>,
   );
 };
-
 const rdsFake = () => {
   let exists = true;
   let busyReads = 0;
@@ -99,6 +96,7 @@ const rdsFake = () => {
       DBInstanceStatus: "Running",
       deletionProtection: false,
       DBInstanceClass: "test-class",
+      engineVersion: "16.0",
       DBInstanceStorage: 20,
       serverlessConfig: { scaleMin: 1, scaleMax: 4, autoPause: false },
     });
@@ -201,7 +199,6 @@ const rdsFake = () => {
   };
   return { state, specs, sslRequests, calls, methods };
 };
-
 it("rejects batch purchases before calling any SDK method", async () => {
   await expect(
     run(
@@ -213,7 +210,8 @@ it("rejects batch purchases before calling any SDK method", async () => {
           output: undefined,
           news: {
             name: "test-db",
-            create: { ...create, amount: 2 },
+            ...create,
+            amount: 2,
           } as unknown as InstanceProps,
         });
       }),
@@ -225,7 +223,6 @@ it("rejects batch purchases before calling any SDK method", async () => {
     operation: "CreateDBInstance",
   });
 });
-
 it("looks up RDS by region across every fuzzy-search page", async () => {
   const fake = rdsFake();
   const pages: number[] = [];
@@ -234,7 +231,7 @@ it("looks up RDS by region across every fuzzy-search page", async () => {
       const provider = yield* Instance.Provider;
       return yield* provider.read!({
         ...base,
-        olds: { name: "test-db", create },
+        olds: { name: "test-db", ...create },
         output: undefined,
       });
     }),
@@ -273,23 +270,20 @@ it("looks up RDS by region across every fuzzy-search page", async () => {
   expect(pages).toEqual([1, 2]);
   expect(result).toMatchObject({ instanceId: "rm-test" });
 });
-
 it("rotates SSL material after spec convergence and does not mutate on reapply", async () => {
   const fake = rdsFake();
   const olds: InstanceProps = {
     name: "test-db",
-    create,
+    ...create,
     ssl: { SSLEnabled: 1, CAType: "custom", serverCert: "old-certificate" },
     sslServerKey: Redacted.make("old-synthetic-key"),
   };
   const news: InstanceProps = {
     ...olds,
-    spec: {
-      serverlessConfiguration: {
-        minCapacity: 2,
-        maxCapacity: 8,
-        autoPause: true,
-      },
+    serverlessConfig: {
+      minCapacity: 2,
+      maxCapacity: 8,
+      autoPause: true,
     },
     ssl: { ...olds.ssl, serverCert: "new-certificate" },
     sslServerKey: Redacted.make("new-synthetic-key"),
@@ -320,7 +314,6 @@ it("rotates SSL material after spec convergence and does not mutate on reapply",
     fake.calls.indexOf("spec") + 1,
   );
 });
-
 it("can enable, disable, and re-enable RDS protection with an idempotency cache", async () => {
   const fake = rdsFake();
   await run(
@@ -330,8 +323,8 @@ it("can enable, disable, and re-enable RDS protection with an idempotency cache"
       for (const deletionProtection of [true, false, true]) {
         output = yield* provider.reconcile({
           ...base,
-          olds: { name: "test-db", create },
-          news: { name: "test-db", create, deletionProtection },
+          olds: { name: "test-db", ...create },
+          news: { name: "test-db", ...create, deletionProtection },
           output,
         });
         expect(fake.state.deletionProtection).toBe(deletionProtection);
@@ -341,7 +334,6 @@ it("can enable, disable, and re-enable RDS protection with an idempotency cache"
     { rds: fake.methods },
   );
 });
-
 it.each(["RDS", "Tair", "ACK"])(
   "rejects mismatched %s regions before observing or mutating",
   async (service) => {
@@ -359,7 +351,7 @@ it.each(["RDS", "Tair", "ACK"])(
           const provider = yield* resource.Provider;
           return yield* provider.read!({
             ...base,
-            olds: { name: "test", create: { regionId: "cn-hangzhou" } },
+            olds: { name: "test", regionId: "cn-hangzhou" },
             output: undefined,
           } as any);
         }),
@@ -372,7 +364,6 @@ it.each(["RDS", "Tair", "ACK"])(
     });
   },
 );
-
 it.each([
   "RequiredParam.NotFound",
   "InvalidRegionId.NotFound",
@@ -406,7 +397,6 @@ it.each([
     ),
   ).rejects.toMatchObject({ _tag: "AlibabaProviderError" });
 });
-
 it("does not serialize SDK message secrets and still recognizes transport failures", () => {
   const error = fromSdkError("RDS", "CreateDBInstance", {
     code: "ReadTimeout",
@@ -417,7 +407,6 @@ it("does not serialize SDK message secrets and still recognizes transport failur
   expect(isTransient(error)).toBe(true);
   expect(error.requestId).toBe("request-test");
 });
-
 it.each(["RDS", "Tair"])(
   "generates valid %s account names and preserves persisted names",
   async (service) => {
@@ -465,7 +454,6 @@ it.each(["RDS", "Tair"])(
     expect(names[1]).toBe("persisted_name");
   },
 );
-
 it("does not replace an account when Normal becomes explicit", async () => {
   const olds = {
     instanceId: "rm-test",
@@ -487,7 +475,6 @@ it("does not replace an account when Normal becomes explicit", async () => {
     ),
   ).toBeUndefined();
 });
-
 it("deletes a Pending vSwitch after it becomes Available", async () => {
   let reads = 0;
   let deletes = 0;
@@ -520,7 +507,6 @@ it("deletes a Pending vSwitch after it becomes Available", async () => {
   );
   expect(deletes).toBe(1);
 });
-
 it("accepts equivalent ACR SDK configuration without updating", async () => {
   const config = {
     repoType: "PRIVATE",
@@ -556,7 +542,6 @@ it("accepts equivalent ACR SDK configuration without updating", async () => {
     },
   );
 });
-
 it("repairs ACK cluster-spec drift with unchanged desired inputs", async () => {
   const state = new ACK.DescribeClusterDetailResponseBody({
     clusterId: "c-test",
@@ -568,8 +553,9 @@ it("repairs ACK cluster-spec drift with unchanged desired inputs", async () => {
   let mutations = 0;
   const props = {
     name: "test",
-    create: { addons: [{ name: "flannel" }], containerCidr: "10.1.0.0/16" },
-    modify: { clusterSpec: "ack.pro.small" },
+    addons: [{ name: "flannel" }],
+    containerCidr: "10.1.0.0/16",
+    clusterSpec: "ack.pro.small",
   };
   await run(
     Effect.gen(function* () {
@@ -598,7 +584,6 @@ it("repairs ACK cluster-spec drift with unchanged desired inputs", async () => {
   );
   expect(mutations).toBe(1);
 });
-
 it("repairs node-pool image drift without changing desired size", async () => {
   const state = new ACK.DescribeClusterNodePoolDetailResponseBody({
     nodepoolInfo: { name: "test", nodepoolId: "np-test" },
@@ -608,8 +593,7 @@ it("repairs node-pool image drift without changing desired size", async () => {
   const props = {
     clusterId: "c-test",
     name: "test",
-    create: {},
-    modify: { scalingGroup: { imageId: "desired-image" } },
+    scalingGroup: { imageId: "desired-image" },
   };
   let mutations = 0;
   await run(
@@ -640,7 +624,6 @@ it("repairs node-pool image drift without changing desired size", async () => {
   );
   expect(mutations).toBe(1);
 });
-
 it.each([undefined, '{"a":1,"b":2}'])(
   "accepts addon default or equivalent JSON config (%s)",
   async (config) => {
@@ -670,7 +653,6 @@ it.each([undefined, '{"a":1,"b":2}'])(
     );
   },
 );
-
 it("uses a fresh Tair token for a later return to the same size, including transient retries", async () => {
   const state = {
     instanceId: "r-test",
@@ -688,7 +670,7 @@ it("uses a fresh Tair token for a later return to the same size, including trans
       const provider = yield* Tair.Provider;
       let output: any = { instanceId: "r-test", name: "test" };
       for (const instanceClass of ["medium", "large", "medium"]) {
-        const news = { name: "test", create: {}, spec: { instanceClass } };
+        const news = { name: "test", instanceClass };
         output = yield* provider.reconcile({
           ...base,
           olds: undefined,
@@ -730,7 +712,6 @@ it("uses a fresh Tair token for a later return to the same size, including trans
   expect(tokens[4]).toBe(tokens[5]);
   expect(new Set(tokens).size).toBe(3);
 });
-
 it("refuses to delete historical RDS batch state as if it represented one instance", async () => {
   await expect(
     run(
@@ -738,7 +719,7 @@ it("refuses to delete historical RDS batch state as if it represented one instan
         const provider = yield* Instance.Provider;
         yield* provider.delete({
           ...base,
-          olds: { create: { ...create, amount: 2 } },
+          olds: { ...create, amount: 2 },
           output: { instanceId: "rm-test" },
         } as any);
       }),
@@ -747,7 +728,6 @@ it("refuses to delete historical RDS batch state as if it represented one instan
     ),
   ).rejects.toMatchObject({ _tag: "AlibabaInvariantError" });
 });
-
 it("rejects a persisted region mismatch even when the new request matches the provider", async () => {
   await expect(
     run(
@@ -756,7 +736,7 @@ it("rejects a persisted region mismatch even when the new request matches the pr
         yield* provider.reconcile({
           ...base,
           olds: undefined,
-          news: { create: { ...create, regionId: "ap-southeast-5" } },
+          news: { ...create, regionId: "ap-southeast-5" },
           output: { instanceId: "rm-test", regionId: "cn-hangzhou" },
         } as any);
       }),
@@ -765,7 +745,6 @@ it("rejects a persisted region mismatch even when the new request matches the pr
     ),
   ).rejects.toMatchObject({ operation: "ValidateRegion" });
 });
-
 it("rejects SSL secrets without configuration before calling the SDK", async () => {
   await expect(
     run(
@@ -775,7 +754,7 @@ it("rejects SSL secrets without configuration before calling the SDK", async () 
           ...base,
           olds: undefined,
           output: undefined,
-          news: { create, sslServerKey: Redacted.make("synthetic-key") },
+          news: { ...create, sslServerKey: Redacted.make("synthetic-key") },
         });
       }),
       InstanceProvider({ wait }),
@@ -783,7 +762,6 @@ it("rejects SSL secrets without configuration before calling the SDK", async () 
     ),
   ).rejects.toMatchObject({ operation: "ModifyDBInstanceSSL" });
 });
-
 it("leaves omitted namespace configuration fields unmanaged", async () => {
   await run(
     Effect.gen(function* () {
@@ -817,7 +795,6 @@ it("leaves omitted namespace configuration fields unmanaged", async () => {
     },
   );
 });
-
 it.each(["network", "switch"])(
   "recovers a VPC %s from the second name-search page",
   async (kind) => {
@@ -884,14 +861,13 @@ it.each(["network", "switch"])(
     expect(result).toBeDefined();
   },
 );
-
 it("does not repeat an RDS resize that converged before state was persisted", async () => {
   const fake = rdsFake();
   await run(
     Effect.gen(function* () {
       const provider = yield* Instance.Provider;
-      const olds = { name: "test-db", create, spec: { DBInstanceStorage: 10 } };
-      const news = { ...olds, spec: { DBInstanceStorage: 20 } };
+      const olds = { name: "test-db", ...create, DBInstanceStorage: 10 };
+      const news = { ...olds, DBInstanceStorage: 20 };
       yield* provider.reconcile({
         ...base,
         olds,

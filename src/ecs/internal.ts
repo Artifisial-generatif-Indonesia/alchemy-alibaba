@@ -1,3 +1,4 @@
+import { diffTags } from "alchemy/Tags";
 import * as ECS from "@alicloud/ecs20140526";
 import * as Effect from "effect/Effect";
 import type { AlibabaClientSet } from "../clients.ts";
@@ -29,16 +30,16 @@ export const tagRecord = (
 
 export const syncTags = Effect.fn("ECS.syncTags")(function* (
   clients: AlibabaClientSet,
-  resourceType: "instance" | "securitygroup",
+  resourceType: "instance" | "securitygroup" | "disk" | "keypair",
   resourceId: string,
   observed: Readonly<Record<string, string>>,
   desired: Readonly<Record<string, string>>,
 ) {
   if (tagsEqual(observed, desired)) return;
+  const { removed, upsert } = diffTags({ ...observed }, { ...desired });
   const changed = Object.fromEntries(
-    Object.entries(desired).filter(([key, value]) => observed[key] !== value),
+    upsert.map(({ Key, Value }) => [Key, Value]),
   );
-  const removed = Object.keys(observed).filter((key) => !(key in desired));
   if (Object.keys(changed).length)
     yield* retryingSdkCall("ECS", "TagResources", () =>
       clients.ecs.tagResources(

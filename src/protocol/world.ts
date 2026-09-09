@@ -49,6 +49,7 @@ type AckState = "creating" | "running" | "deleting";
 
 interface TairRecord {
   instanceClass: string;
+  engineVersion?: string;
   instanceId: string;
   name: string;
   status: TairStatus;
@@ -94,7 +95,17 @@ interface RdsRecord {
   storageType?: string;
   engineVersion?: string;
   category?: string;
-  serverless?: { ScaleMin: number; ScaleMax: number; AutoPause: boolean };
+  serverless?: {
+    ScaleMin?: number;
+    ScaleMax?: number;
+    AutoPause?: boolean;
+    SwitchForce?: boolean;
+  };
+  compressionMode?: string;
+  backupPolicy?: Record<string, unknown>;
+  parameters?: Record<string, string>;
+  runningParameters?: Record<string, string>;
+  maintainTime?: string;
   deletionProtection: boolean;
   ssl: Record<string, unknown>;
   sslReads: number;
@@ -110,6 +121,7 @@ interface RdsRecord {
 }
 
 interface AckRecord {
+  clusterSpec?: string;
   clusterId: string;
   name: string;
   state: AckState;
@@ -209,6 +221,8 @@ export class ProtocolWorld {
   readonly tair = new Map<string, TairRecord>();
   readonly rds = new Map<string, RdsRecord>();
   readonly ecs = new EcsResources();
+  readonly connectivity = new VpcConnectivity();
+  readonly ram = new RamResources();
   readonly resources = new RpcResources((id) => this.rds.get(id)?.engine);
   readonly roa = new RoaResources();
   readonly ack = new Map<string, AckRecord>();
@@ -282,7 +296,14 @@ export class ProtocolWorld {
       };
     }
 
-    const child = version === "2014-05-26" ? this.ecs.dispatch(action, params) : this.resources.dispatch(action, params, version);
+    const child =
+      version === "2015-05-01"
+        ? this.ram.dispatch(action, params)
+        : version === "2014-05-26"
+          ? this.ecs.dispatch(action, params)
+          : ((version === "2016-04-28"
+              ? this.connectivity.dispatch(action, params)
+              : undefined) ?? this.resources.dispatch(action, params, version));
     if (child)
       return fault?.accept
         ? {
@@ -339,6 +360,7 @@ export class ProtocolWorld {
         const record = this.tair.get(params.InstanceId ?? "");
         if (!record) return errorBody("InvalidInstanceId.NotFound", "absent");
         record.instanceClass = params.InstanceClass ?? record.instanceClass;
+        record.engineVersion = params.MajorVersion ?? record.engineVersion;
         return ok({});
       }
       case "ResetAccountPassword":
@@ -349,6 +371,21 @@ export class ProtocolWorld {
         return this.destroyTair(params);
       case "CreateDBInstance":
         return this.createRds(params, fault);
+      case "CloneDBInstance": {
+        const source = this.rds.get(params.DBInstanceId ?? "");
+        if (!source)
+          return errorBody("InvalidDBInstanceName.NotFound", "absent");
+        return this.createRds(
+          {
+            ...params,
+            Engine: source.engine ?? "PostgreSQL",
+            EngineVersion: source.engineVersion ?? "16.0",
+            SecurityIPList: "127.0.0.1",
+            DBInstanceNetType: "Intranet",
+          },
+          fault,
+        );
+      }
       case "DescribeDBInstances":
         return this.describeRds(params);
       case "DescribeDBInstanceAttribute":
@@ -379,6 +416,78 @@ export class ProtocolWorld {
         record.sslReads = 3;
         return ok({});
       }
+      case "DescribeBackupPolicy": {
+        const record = this.rds.get(params.DBInstanceId ?? "");
+        return record
+          ? ok(record.backupPolicy ?? {})
+          : errorBody("InvalidDBInstanceName.NotFound", "absent");
+      }
+      case "ModifyBackupPolicy": {
+        const record = this.rds.get(params.DBInstanceId ?? "");
+        if (!record)
+          return errorBody("InvalidDBInstanceName.NotFound", "absent");
+        record.backupPolicy = {
+          ...record.backupPolicy,
+          ...Object.fromEntries(
+            [
+              "PreferredBackupPeriod",
+              "PreferredBackupTime",
+              "EnableBackupLog",
+              "ReleasedKeepPolicy",
+              "BackupRetentionPeriod",
+              "LogBackupRetentionPeriod",
+            ].flatMap((key) =>
+              params[key] === undefined
+                ? []
+                : [
+                    [
+                      key,
+                      key.endsWith("RetentionPeriod")
+                        ? Number(params[key])
+                        : params[key],
+                    ],
+                  ],
+            ),
+          ),
+        };
+        return ok({});
+      }
+      case "DescribeParameters": {
+        const record = this.rds.get(params.DBInstanceId ?? "");
+        if (!record)
+          return errorBody("InvalidDBInstanceName.NotFound", "absent");
+        const parameters = (values: Record<string, string> = {}) => ({
+          DBInstanceParameter: Object.entries(values).map(
+            ([ParameterName, ParameterValue]) => ({
+              ParameterName,
+              ParameterValue,
+            }),
+          ),
+        });
+        return ok({
+          ConfigParameters: parameters(record.parameters),
+          RunningParameters: parameters(record.runningParameters),
+        });
+      }
+      case "ModifyParameter": {
+        const record = this.rds.get(params.DBInstanceId ?? "");
+        if (!record)
+          return errorBody("InvalidDBInstanceName.NotFound", "absent");
+        record.parameters = {
+          ...record.parameters,
+          ...JSON.parse(params.Parameters ?? "{}"),
+        };
+        if (params.Forcerestart === "true")
+          record.runningParameters = { ...record.parameters };
+        return ok({});
+      }
+      case "ModifyDBInstanceMaintainTime": {
+        const record = this.rds.get(params.DBInstanceId ?? "");
+        if (!record)
+          return errorBody("InvalidDBInstanceName.NotFound", "absent");
+        record.maintainTime = params.MaintainTime;
+        return ok({});
+      }
       case "ModifyDBInstanceSpec": {
         const record = this.rds.get(params.DBInstanceId ?? "");
         if (!record)
@@ -387,15 +496,27 @@ export class ProtocolWorld {
         record.describes = 0;
         record.pendingSpec = () => {
           record.instanceClass = params.DBInstanceClass ?? record.instanceClass;
+          record.compressionMode =
+            params.CompressionMode ?? record.compressionMode;
           record.storage = Number(params.DBInstanceStorage ?? record.storage);
           record.storageType =
             params.DBInstanceStorageType ?? record.storageType;
           if (params.ServerlessConfiguration !== undefined) {
             const config = JSON.parse(params.ServerlessConfiguration);
             record.serverless = {
-              ScaleMin: config.MinCapacity,
-              ScaleMax: config.MaxCapacity,
-              AutoPause: config.AutoPause,
+              ...record.serverless,
+              ...(config.MinCapacity !== undefined
+                ? { ScaleMin: config.MinCapacity }
+                : {}),
+              ...(config.MaxCapacity !== undefined
+                ? { ScaleMax: config.MaxCapacity }
+                : {}),
+              ...(config.AutoPause !== undefined
+                ? { AutoPause: config.AutoPause }
+                : {}),
+              ...(config.SwitchForce !== undefined
+                ? { SwitchForce: config.SwitchForce }
+                : {}),
             };
           }
         };
@@ -743,6 +864,7 @@ export class ProtocolWorld {
     const vSwitchId = param(params, "VSwitchId");
     const record: TairRecord = {
       instanceClass: param(params, "InstanceClass") ?? "redis.test",
+      engineVersion: param(params, "EngineVersion"),
       instanceId,
       name,
       status: "Creating",
@@ -889,6 +1011,7 @@ export class ProtocolWorld {
               ? {}
               : { InstanceId: record.instanceId, InstanceName: record.name }),
             InstanceClass: record.instanceClass,
+            EngineVersion: record.engineVersion,
             InstanceStatus: record.status,
             VpcId: record.vpcId,
             VSwitchId: record.vSwitchId,
@@ -1178,6 +1301,8 @@ export class ProtocolWorld {
             EngineVersion: record.engineVersion,
             Category: record.category,
             ServerlessConfig: record.serverless,
+            CompressionMode: record.compressionMode,
+            MaintainTime: record.maintainTime,
             Engine: record.engine,
             DBInstanceId: record.instanceId,
             DBInstanceDescription: record.name,
@@ -1263,6 +1388,7 @@ export class ProtocolWorld {
   private ackBody(cluster: AckRecord): Record<string, unknown> {
     return {
       cluster_id: cluster.clusterId,
+      cluster_spec: cluster.clusterSpec,
       name: cluster.name,
       state: cluster.state,
       vpc_id: cluster.vpcId,
@@ -1283,6 +1409,7 @@ export class ProtocolWorld {
       : [];
     this.ack.set(clusterId, {
       clusterId,
+      clusterSpec: String(body.cluster_spec),
       name: String(body.name ?? clusterId),
       state: "running",
       vpcId: typeof body.vpcid === "string" ? body.vpcid : undefined,
@@ -1327,6 +1454,8 @@ export class ProtocolWorld {
       };
     }
     return this.roa.task(() => {
+      if (typeof body.cluster_spec === "string")
+        cluster.clusterSpec = body.cluster_spec;
       if (typeof body.deletion_protection === "boolean")
         cluster.deletionProtection = body.deletion_protection;
     });
@@ -1429,3 +1558,5 @@ export class ProtocolWorld {
     return ok({ IsSuccess: true, Code: "success" });
   }
 }
+import { VpcConnectivity } from "./vpc-connectivity.ts";
+import { RamResources } from "./ram-resources.ts";

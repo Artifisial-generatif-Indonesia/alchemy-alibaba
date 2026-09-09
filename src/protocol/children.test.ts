@@ -13,11 +13,9 @@ import {
   protocolStack,
 } from "./stack.ts";
 import { assertNoSecrets } from "./redaction.ts";
-
 const password = Redacted.make("ProtocolChildPassword1!");
 const rotated = Redacted.make("ProtocolChildPassword2!");
-
-describe("Child resource SDK protocol lifecycles", { timeout: 30_000 }, () => {
+describe("Child resource SDK protocol lifecycles", { timeout: 30000 }, () => {
   it.each(["MySQL", "PostgreSQL"] as const)(
     "persists RDS %s children, rotates passwords, and verifies teardown semantics",
     async (engine) => {
@@ -31,15 +29,13 @@ describe("Child resource SDK protocol lifecycles", { timeout: 30_000 }, () => {
               Effect.gen(function* () {
                 const instance = yield* RDS.Instance("rds", {
                   name: "protocol-children",
-                  create: {
-                    engine,
-                    engineVersion: engine === "MySQL" ? "8.0" : "16.0",
-                    DBInstanceClass: "protocol-class",
-                    DBInstanceStorage: 20,
-                    DBInstanceNetType: "Intranet",
-                    payType: "Postpaid",
-                    securityIPList: "127.0.0.1",
-                  },
+                  engine,
+                  engineVersion: engine === "MySQL" ? "8.0" : "16.0",
+                  DBInstanceClass: "protocol-class",
+                  DBInstanceStorage: 20,
+                  DBInstanceNetType: "Intranet",
+                  payType: "Postpaid",
+                  securityIPList: "127.0.0.1",
                 });
                 const account = yield* RDS.Account("account", {
                   instanceId: instance.instanceId,
@@ -144,7 +140,6 @@ describe("Child resource SDK protocol lifecycles", { timeout: 30_000 }, () => {
       );
     },
   );
-
   it("propagates an authorization failure and recovers an accepted account create without duplicating it", async () => {
     await withTempDir((directory) =>
       withProtocolHarness(async ({ server, world }) => {
@@ -191,7 +186,6 @@ describe("Child resource SDK protocol lifecycles", { timeout: 30_000 }, () => {
       }),
     );
   });
-
   it("uses the Tair account envelope and removes a dedicated whitelist group", async () => {
     await withTempDir((directory) =>
       withProtocolHarness(async ({ server, world }) => {
@@ -233,7 +227,6 @@ describe("Child resource SDK protocol lifecycles", { timeout: 30_000 }, () => {
       }),
     );
   });
-
   it("handles ACR namespaces, repository updates, ACL comment replacement, and retained parents", async () => {
     await withTempDir((directory) =>
       withProtocolHarness(async ({ server, world }) => {

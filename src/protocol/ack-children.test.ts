@@ -10,19 +10,16 @@ import {
   protocolStack,
 } from "./stack.ts";
 import { assertNoSecrets } from "./redaction.ts";
-
 const clusterProps = {
   name: "protocol-ack-children",
-  create: {
-    clusterType: "ManagedKubernetes" as const,
-    clusterSpec: "ack.pro.small" as const,
-    profile: "Default" as const,
-    addons: [{ name: "flannel" }],
-    vpcid: "vpc-protocol",
-    vswitchIds: ["vsw-protocol"],
-    containerCidr: "172.20.0.0/16",
-    serviceCidr: "172.21.0.0/20",
-  },
+  clusterType: "ManagedKubernetes" as const,
+  clusterSpec: "ack.pro.small" as const,
+  profile: "Default" as const,
+  addons: [{ name: "flannel" }],
+  vpcid: "vpc-protocol",
+  vswitchIds: ["vsw-protocol"],
+  containerCidr: "172.20.0.0/16",
+  serviceCidr: "172.21.0.0/20",
 };
 const poolCreate = {
   scalingGroup: {
@@ -32,8 +29,7 @@ const poolCreate = {
     imageId: "image-1",
   },
 };
-
-describe("ACK child ROA protocol", { timeout: 30_000 }, () => {
+describe("ACK child ROA protocol", { timeout: 30000 }, () => {
   it("persists node pools and addons, changes image/config/version, and deletes children before the cluster", async () => {
     await withTempDir((directory) =>
       withProtocolHarness(async ({ server, world }) => {
@@ -45,18 +41,17 @@ describe("ACK child ROA protocol", { timeout: 30_000 }, () => {
             Effect.gen(function* () {
               const cluster = yield* ACK.ManagedCluster("cluster", {
                 ...clusterProps,
-                modify: { deletionProtection: revision !== 1 },
-                upgrade: {
-                  nextVersion:
-                    revision > 1 ? "1.33.1-aliyun.1" : "1.32.1-aliyun.1",
-                },
+                deletionProtection: revision !== 1,
+                kubernetesVersion:
+                  revision > 1 ? "1.33.1-aliyun.1" : "1.32.1-aliyun.1",
               });
               const pool = yield* ACK.NodePool("pool", {
                 clusterId: cluster.clusterId,
                 name: "workers",
-                create: poolCreate,
-                modify: {
-                  scalingGroup: { imageId: revision ? "image-2" : "image-1" },
+                ...poolCreate,
+                scalingGroup: {
+                  ...poolCreate.scalingGroup,
+                  imageId: revision ? "image-2" : "image-1",
                 },
                 tags: { revision: String(revision) },
                 delete: { force: false },
@@ -156,7 +151,6 @@ describe("ACK child ROA protocol", { timeout: 30_000 }, () => {
       }),
     );
   });
-
   it("recovers a cluster accepted before an error through the region-scoped v1 inventory", async () => {
     await withTempDir((directory) =>
       withProtocolHarness(async ({ server, world, clients }) => {
@@ -201,7 +195,6 @@ describe("ACK child ROA protocol", { timeout: 30_000 }, () => {
       }),
     );
   });
-
   it("preserves the cluster and state when a child delete task fails, then resumes after recovery", async () => {
     await withTempDir((directory) =>
       withProtocolHarness(async ({ server, world }) => {
@@ -214,7 +207,7 @@ describe("ACK child ROA protocol", { timeout: 30_000 }, () => {
             yield* ACK.NodePool("pool", {
               clusterId: cluster.clusterId,
               name: "workers",
-              create: poolCreate,
+              ...poolCreate,
             });
             return { id: cluster.clusterId };
           }),

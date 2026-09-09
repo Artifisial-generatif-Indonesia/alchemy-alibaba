@@ -29,6 +29,26 @@ interface Instance {
   Description?: string;
   DeletionProtection: boolean;
   AutoReleaseTime?: string;
+  InternetMaxBandwidthOut?: number;
+}
+interface Disk {
+  DiskId: string;
+  DiskName: string;
+  ZoneId: string;
+  RegionId: string;
+  Size: number;
+  Status: string;
+  InstanceId?: string;
+  Device?: string;
+  DeleteWithInstance: boolean;
+  Tags: Tags;
+  Description?: string;
+}
+interface KeyPair {
+  KeyPairName: string;
+  KeyPairFingerPrint: string;
+  PublicKey: string;
+  Tags: Tags;
 }
 interface Group {
   SecurityGroupId: string;
@@ -45,7 +65,12 @@ interface Rule {
   NicType: string;
   IpProtocol: string;
   PortRange: string;
-  SourceCidrIp: string;
+  SourceCidrIp?: string;
+  Ipv6SourceCidrIp?: string;
+  SourceGroupId?: string;
+  DestCidrIp?: string;
+  Ipv6DestCidrIp?: string;
+  DestGroupId?: string;
   Priority: string;
 }
 const tags = (p: RpcParams): Tags => ({
@@ -58,6 +83,8 @@ const values = (p: RpcParams, name: string) =>
     .filter((k) => new RegExp(`^${name}\\.\\d+$`).test(k))
     .map((k) => p[k]!);
 export class EcsResources {
+  readonly disks = new Map<string, Disk>();
+  readonly keyPairs = new Map<string, KeyPair>();
   readonly instances = new Map<string, Instance>();
   readonly groups = new Map<string, Group>();
   readonly rules = new Map<string, { group: string; rule: Rule }>();
@@ -73,6 +100,100 @@ export class EcsResources {
     const instance = this.instances.get(p.InstanceId ?? "");
     const group = this.groups.get(p.SecurityGroupId ?? "");
     switch (action) {
+      case "CreateDisk": {
+        const previous = this.tokens.get(p.ClientToken!);
+        if (previous) return ok({ DiskId: previous });
+        const id = `disk-test-${++this.sequence}`;
+        this.disks.set(id, {
+          DiskId: id,
+          DiskName: p.DiskName!,
+          ZoneId: p.ZoneId!,
+          RegionId: p.RegionId!,
+          Size: Number(p.Size),
+          Status: "Available",
+          DeleteWithInstance: false,
+          Tags: tags(p),
+          Description: p.Description,
+        });
+        this.tokens.set(p.ClientToken!, id);
+        return ok({ DiskId: id });
+      }
+      case "DescribeDisks": {
+        const ids = p.DiskIds ? JSON.parse(p.DiskIds) : undefined;
+        const all = [...this.disks.values()].filter(
+          (v) =>
+            (!ids || ids.includes(v.DiskId)) &&
+            (!p.DiskName || v.DiskName === p.DiskName),
+        );
+        const size = Number(p.PageSize ?? 50),
+          start = (Number(p.PageNumber ?? 1) - 1) * size;
+        return ok({
+          Disks: { Disk: all.slice(start, start + size) },
+          TotalCount: all.length,
+        });
+      }
+      case "ResizeDisk": {
+        const v = this.disks.get(p.DiskId!);
+        if (!v) return error("InvalidDiskId.NotFound");
+        if (Number(p.NewSize) <= v.Size)
+          return error("InvalidParameter.NewSize");
+        v.Size = Number(p.NewSize);
+        return ok();
+      }
+      case "ModifyDiskAttribute": {
+        const v = this.disks.get(p.DiskId!);
+        if (!v) return error("InvalidDiskId.NotFound");
+        v.DiskName = p.DiskName ?? v.DiskName;
+        v.Description = p.Description ?? v.Description;
+        if (p.DeleteWithInstance !== undefined)
+          v.DeleteWithInstance = p.DeleteWithInstance === "true";
+        return ok();
+      }
+      case "AttachDisk": {
+        const v = this.disks.get(p.DiskId!);
+        if (!v) return error("InvalidDiskId.NotFound");
+        if (v.InstanceId || !this.instances.has(p.InstanceId!))
+          return error("IncorrectDiskStatus");
+        v.InstanceId = p.InstanceId;
+        v.Status = "In_use";
+        v.Device = "/dev/vdb";
+        v.DeleteWithInstance = p.DeleteWithInstance === "true";
+        return ok();
+      }
+      case "DetachDisk": {
+        const v = this.disks.get(p.DiskId!);
+        if (!v) return error("InvalidDiskId.NotFound");
+        v.InstanceId = undefined;
+        v.Status = "Available";
+        return ok();
+      }
+      case "DeleteDisk": {
+        const v = this.disks.get(p.DiskId!);
+        if (v?.InstanceId) return error("IncorrectDiskStatus");
+        this.disks.delete(p.DiskId!);
+        return ok();
+      }
+      case "ImportKeyPair": {
+        if (this.keyPairs.has(p.KeyPairName!))
+          return error("InvalidKeyPair.Duplicate");
+        this.keyPairs.set(p.KeyPairName!, {
+          KeyPairName: p.KeyPairName!,
+          KeyPairFingerPrint: `fingerprint-${++this.sequence}`,
+          PublicKey: p.PublicKeyBody!,
+          Tags: tags(p),
+        });
+        return ok();
+      }
+      case "DescribeKeyPairs": {
+        const all = [...this.keyPairs.values()].filter(
+          (v) => !p.KeyPairName || v.KeyPairName === p.KeyPairName,
+        );
+        return ok({ KeyPairs: { KeyPair: all }, TotalCount: all.length });
+      }
+      case "DeleteKeyPairs":
+        for (const name of JSON.parse(p.KeyPairNames ?? "[]"))
+          this.keyPairs.delete(name);
+        return ok();
       case "RunInstances": {
         const existing = this.tokens.get(p.ClientToken ?? "");
         if (existing)
@@ -82,6 +203,7 @@ export class EcsResources {
           InstanceId: id,
           InstanceName: p.InstanceName!,
           ImageId: p.ImageId!,
+          InternetMaxBandwidthOut: Number(p.InternetMaxBandwidthOut ?? 0),
           InstanceType: p.InstanceType!,
           RegionId: p.RegionId!,
           InstanceChargeType: p.InstanceChargeType!,
@@ -142,6 +264,40 @@ export class EcsResources {
         if (instance.Status !== "Stopped")
           return error("IncorrectInstanceStatus");
         this.instances.delete(instance.InstanceId);
+        for (const [id, disk] of this.disks)
+          if (disk.InstanceId === instance.InstanceId) {
+            if (disk.DeleteWithInstance) this.disks.delete(id);
+            else {
+              disk.InstanceId = undefined;
+              disk.Status = "Available";
+            }
+          }
+        return ok();
+      case "ModifyInstanceSpec":
+        if (!instance) return error("InvalidInstanceId.NotFound");
+        if (p.InstanceType !== undefined) {
+          if (instance.Status !== "Stopped")
+            return error("InvalidInstanceStatus.NotStopped");
+          instance.InstanceType = p.InstanceType;
+        }
+        if (p.InternetMaxBandwidthOut !== undefined)
+          instance.InternetMaxBandwidthOut = Number(p.InternetMaxBandwidthOut);
+        return ok();
+      case "JoinSecurityGroup":
+        if (!instance) return error("InvalidInstanceId.NotFound");
+        if (
+          !instance.SecurityGroupIds.SecurityGroupId.includes(
+            p.SecurityGroupId!,
+          )
+        )
+          instance.SecurityGroupIds.SecurityGroupId.push(p.SecurityGroupId!);
+        return ok();
+      case "LeaveSecurityGroup":
+        if (!instance) return error("InvalidInstanceId.NotFound");
+        instance.SecurityGroupIds.SecurityGroupId =
+          instance.SecurityGroupIds.SecurityGroupId.filter(
+            (id) => id !== p.SecurityGroupId,
+          );
         return ok();
       case "ModifyInstanceAttribute":
         if (!instance) return error("InvalidInstanceId.NotFound");
@@ -206,7 +362,11 @@ export class EcsResources {
         const resource =
           p.ResourceType === "instance"
             ? this.instances.get(id)
-            : this.groups.get(id);
+            : p.ResourceType === "disk"
+              ? this.disks.get(id)
+              : p.ResourceType === "keypair"
+                ? this.keyPairs.get(id)
+                : this.groups.get(id);
         if (!resource)
           return error(
             p.ResourceType === "instance"
@@ -237,22 +397,34 @@ export class EcsResources {
           NextToken: end < all.length ? String(end) : undefined,
         });
       }
+      case "AuthorizeSecurityGroupEgress":
       case "AuthorizeSecurityGroup": {
         if (!group) return error("InvalidSecurityGroupId.NotFound");
         const rule = {
-          Direction: "ingress",
+          Direction: action.endsWith("Egress") ? "egress" : "ingress",
           Policy: "Accept",
           NicType: p.NicType!,
           IpProtocol: p.IpProtocol!,
           PortRange: p.PortRange!,
-          SourceCidrIp: p.SourceCidrIp!,
+          SourceCidrIp: p.SourceCidrIp,
+          Ipv6SourceCidrIp: p.Ipv6SourceCidrIp,
+          SourceGroupId: p.SourceGroupId,
+          DestCidrIp: p.DestCidrIp,
+          Ipv6DestCidrIp: p.Ipv6DestCidrIp,
+          DestGroupId: p.DestGroupId,
           Priority: p.Priority!,
         };
         if (
           ![...this.rules.values()].some(
             (r) =>
               r.group === group.SecurityGroupId &&
+              r.rule.Direction === rule.Direction &&
               r.rule.SourceCidrIp === rule.SourceCidrIp &&
+              r.rule.Ipv6SourceCidrIp === rule.Ipv6SourceCidrIp &&
+              r.rule.SourceGroupId === rule.SourceGroupId &&
+              r.rule.DestCidrIp === rule.DestCidrIp &&
+              r.rule.Ipv6DestCidrIp === rule.Ipv6DestCidrIp &&
+              r.rule.DestGroupId === rule.DestGroupId &&
               r.rule.PortRange === rule.PortRange,
           )
         ) {
@@ -264,6 +436,7 @@ export class EcsResources {
         }
         return ok();
       }
+      case "RevokeSecurityGroupEgress":
       case "RevokeSecurityGroup":
         for (const id of values(p, "SecurityGroupRuleId"))
           this.rules.delete(id);

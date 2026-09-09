@@ -8,11 +8,26 @@ not claimed.
 
 ### Changes
 
+- Fix named ACK/RDS replacement identity, ambiguous recovery and saved-ID lookup.
+  Mutable ACK/RDS desired fields and ECS size/group changes update in place.
+- Add redacted ACK credentials, temporary kubeconfig/connection support, and
+  Kubernetes Secret over upstream Manifest. Upstream Kubernetes resources can
+  connect to ACK without application-owned SDK authentication code.
+- Add explicit EIP/NAT/SNAT ownership, RAM roles/policies/RRSA helpers, ACR Image
+  over upstream Docker, and independent ECS keys/disks/attachments/full rules.
+- Add RDS backup policy, parameters, maintenance and restore-to-new-instance;
+  reconcile serverless force/compression settings and narrow unsupported spec fields.
+- Reuse Alchemy tag diffing and add lifecycle progress. Remove request-phase
+  input bags and legacy normalization; 0.2.0 uses one desired-state contract.
+- Document resource composition in COMPOSITION.md. New lifecycle evidence is
+  local only; publishing and connected acceptance remain separate.
+
 - Add ECS instances, security groups, and IPv4 ingress rules, plus a persistent
   dev-stage example wiring private RDS/Tair allowlists to the VM IP. ECS uses
   one pay-as-you-go instance, explicit replacement for immutable settings,
-  graceful deletion, and optional absolute auto-release scheduling. See ECS.md.
-- Custom `AlibabaClientSet` implementations must supply the new `ecs` client.
+  graceful deletion, and optional absolute auto-release scheduling. VM type and
+  security-group membership changes update in place. See ECS.md.
+- Custom `AlibabaClientSet` implementations must supply both `ecs` and `ram` clients.
 
 - Fix lifecycle reliability across Alibaba VPC, RDS, Tair, ACK, and ACR:
   bounded observation/retry, explicit absence errors, regional/paginated
@@ -30,8 +45,8 @@ not claimed.
 
 ### Validation
 
-171 tests across 19 files, TypeScript checking, and build pass. Package validation
-checks the exact file list, all ten public imports, consumer TypeScript usage,
+188 tests across 26 files, TypeScript checking, and build pass. Package validation
+checks the exact file list, all twelve public imports, consumer TypeScript usage,
 and a fresh consumer audit with the documented dependency overrides.
 
 A disposable PostgreSQL 16/VPC/vSwitch run verified provisioning, unchanged
@@ -60,10 +75,11 @@ PostgreSQL ownership-revocation case; it was not an unattended success.
   display; they do not encrypt persisted state. No credentials or project-specific
   account configuration are included in this package.
 
-### Upgrade from v0.1.0
+### Breaking input API from v0.1.0
 
-The existing `v0.1.0` Git tag predates these fixes and dependency pins. Install
-this exact version, set the documented root overrides, and review a
-plan against existing persistent state before applying. Resource type names,
-physical naming conventions, and ownership tags remain stable. No automatic
-state migration or cloud deployment is performed by installation.
+0.2.0 prioritizes the desired-state API over compatibility with 0.1.0. Declare
+resource properties directly; `create`, `modify`, `spec` and cluster `upgrade`
+bags are not supported. Use `kubernetesVersion` with optional `upgradePolicy`,
+and one set of instance sizing values. No compatibility aliases or automatic
+state migration are provided. Follow COMPOSITION.md and the 0.2.0 declarations.
+Installation performs no cloud deployment.

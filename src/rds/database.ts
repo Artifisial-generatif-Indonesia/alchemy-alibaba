@@ -1,3 +1,5 @@
+import { validateDesiredInput } from "../internal/desired-input.ts";
+import { modelFields } from "../internal/model-input.ts";
 import * as RDS from "@alicloud/rds20140815";
 import { isResolved } from "alchemy/Diff";
 import * as Provider from "alchemy/Provider";
@@ -19,7 +21,11 @@ import {
 import type { Without } from "../internal/model-input.ts";
 import type { Providers } from "../providers.ts";
 
-export interface DatabaseProps {
+export interface DatabaseProps
+  extends Without<
+    RDS.CreateDatabaseRequest,
+    "DBInstanceId" | "DBName" | "characterSetName" | "DBDescription"
+  > {
   readonly instanceId: string;
   /** Dependency anchors: create after these accounts, delete before them. */
   readonly accountNames?: readonly string[];
@@ -28,10 +34,6 @@ export interface DatabaseProps {
   readonly name?: string;
   readonly characterSetName: string;
   readonly description?: string;
-  readonly create?: Without<
-    RDS.CreateDatabaseRequest,
-    "DBInstanceId" | "DBName" | "characterSetName" | "DBDescription"
-  >;
 }
 
 export interface DatabaseAttributes {
@@ -57,13 +59,9 @@ export type Database = Resource<
 
 export const Database = Resource<Database>("Alibaba.RDS.Database");
 
-type ObservedDatabase =
-  RDS.DescribeDatabasesResponseBodyDatabasesDatabase;
+type ObservedDatabase = RDS.DescribeDatabasesResponseBodyDatabasesDatabase;
 
-const characterSetMatches = (
-  database: ObservedDatabase,
-  desired: string,
-) => {
+const characterSetMatches = (database: ObservedDatabase, desired: string) => {
   const [characterSetName, collate, ctype] = desired.split(",");
   return (
     database.characterSetName === characterSetName &&
@@ -144,13 +142,16 @@ export const DatabaseProvider = (options: DatabaseProviderOptions = {}) =>
             : toAttributes(instanceId, name, database);
         }),
         reconcile: Effect.fn(function* ({ id, news, output }) {
+          yield* validateDesiredInput(news, Database.Type);
           const name = yield* physicalName(id, news.name ?? output?.name, 64);
           let database = yield* get(news.instanceId, name);
           if (database === undefined) {
             yield* sdkCall("RDS", "CreateDatabase", () =>
               clients.rds.createDatabase(
                 new RDS.CreateDatabaseRequest({
-                  ...news.create,
+                  ...modelFields<
+                    Without<RDS.CreateDatabaseRequest, "DBInstanceId">
+                  >(news, RDS.CreateDatabaseRequest),
                   DBInstanceId: news.instanceId,
                   DBName: name,
                   characterSetName: news.characterSetName,

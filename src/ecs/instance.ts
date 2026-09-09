@@ -82,16 +82,13 @@ const sorted = (ids: readonly string[]) => [...ids].sort();
 const identity = (props: InstanceProps) => ({
   name: props.name,
   imageId: props.imageId,
-  instanceType: props.instanceType,
   vSwitchId: props.vSwitchId,
-  securityGroupIds: sorted(props.securityGroupIds),
   systemDisk: {
     category: props.systemDisk?.category ?? "cloud_essd",
     size: props.systemDisk?.size ?? 40,
   },
   keyPairName: props.keyPairName,
   ramRoleName: props.ramRoleName,
-  internetMaxBandwidthOut: props.internetMaxBandwidthOut ?? 0,
   userData:
     props.userData === undefined ? undefined : Redacted.value(props.userData),
 });
@@ -192,19 +189,14 @@ export const InstanceProvider = (
       const checkIdentity = (value: Observed, props: InstanceProps) =>
         value.instanceChargeType === "PostPaid" &&
         value.imageId === props.imageId &&
-        value.instanceType === props.instanceType &&
-        value.vpcAttributes?.vSwitchId === props.vSwitchId &&
-        isDeepStrictEqual(
-          sorted(value.securityGroupIds?.securityGroupId ?? []),
-          sorted(props.securityGroupIds),
-        )
+        value.vpcAttributes?.vSwitchId === props.vSwitchId
           ? Effect.void
           : Effect.fail(
               new AlibabaInvariantError({
                 resourceType: Instance.Type,
                 operation: "Reconcile",
                 message:
-                  "Observed ECS billing, image, size or network identity differs; review replacement instead of adopting incompatible infrastructure",
+                  "Observed ECS billing, image or subnet identity differs; review replacement instead of adopting incompatible infrastructure",
               }),
             );
       return {
@@ -238,6 +230,13 @@ export const InstanceProvider = (
           const observed = yield* attrs(current);
           if (
             observed.status !== "Running" ||
+            observed.instanceType !== news.instanceType ||
+            !isDeepStrictEqual(
+              sorted(observed.securityGroupIds),
+              sorted(news.securityGroupIds),
+            ) ||
+            (current.internetMaxBandwidthOut ?? 0) !==
+              (news.internetMaxBandwidthOut ?? 0) ||
             !tagsEqual(observed.tags, news.tags ?? {}) ||
             (news.description !== undefined &&
               observed.description !== news.description) ||
@@ -268,6 +267,7 @@ export const InstanceProvider = (
           instanceId: generation,
           news,
           output,
+          session,
         }) {
           yield* requireRegion(
             Instance.Type,
@@ -353,6 +353,11 @@ export const InstanceProvider = (
               read: observe(ids?.[0], name),
               ready: (value) =>
                 running(value) &&
+                value.instanceType === news.instanceType &&
+                isDeepStrictEqual(
+                  sorted(value.securityGroupIds?.securityGroupId ?? []),
+                  sorted(news.securityGroupIds),
+                ) &&
                 ((news.internetMaxBandwidthOut ?? 0) === 0 ||
                   !!value.publicIpAddress?.ipAddress?.[0]),
               wait: options.wait,
@@ -383,6 +388,82 @@ export const InstanceProvider = (
             ready: running,
             wait: options.wait,
           });
+          if (value.instanceType !== news.instanceType) {
+            yield* session.note(`Resizing ECS instance ${instanceId}`);
+            yield* retryingSdkCall("ECS", "StopInstance", () =>
+              clients.ecs.stopInstance(
+                new ECS.StopInstanceRequest({ instanceId, forceStop: false }),
+              ),
+            );
+            yield* waitForPresent({
+              service: "ECS",
+              operation: "StopBeforeResize",
+              read: get(instanceId),
+              ready: (value) => value.status === "Stopped",
+              wait: options.wait,
+            });
+            yield* retryingSdkCall("ECS", "ModifyInstanceSpec", () =>
+              clients.ecs.modifyInstanceSpec(
+                new ECS.ModifyInstanceSpecRequest({
+                  instanceId,
+                  instanceType: news.instanceType,
+                }),
+              ),
+            );
+            yield* retryingSdkCall("ECS", "StartInstance", () =>
+              clients.ecs.startInstance(
+                new ECS.StartInstanceRequest({ instanceId }),
+              ),
+            );
+            value = yield* waitForPresent({
+              service: "ECS",
+              operation: "RunningAfterResize",
+              read: get(instanceId),
+              ready: (value) =>
+                running(value) && value.instanceType === news.instanceType,
+              wait: options.wait,
+            });
+          }
+          const currentGroups = value.securityGroupIds?.securityGroupId ?? [];
+          for (const securityGroupId of news.securityGroupIds.filter(
+            (id) => !currentGroups.includes(id),
+          )) {
+            yield* retryingSdkCall("ECS", "JoinSecurityGroup", () =>
+              clients.ecs.joinSecurityGroup(
+                new ECS.JoinSecurityGroupRequest({
+                  instanceId,
+                  securityGroupId,
+                  regionId: clients.regionId,
+                }),
+              ),
+            );
+          }
+          for (const securityGroupId of currentGroups.filter(
+            (id) => !news.securityGroupIds.includes(id),
+          )) {
+            yield* retryingSdkCall("ECS", "LeaveSecurityGroup", () =>
+              clients.ecs.leaveSecurityGroup(
+                new ECS.LeaveSecurityGroupRequest({
+                  instanceId,
+                  securityGroupId,
+                  regionId: clients.regionId,
+                }),
+              ),
+            );
+          }
+          if (
+            (value.internetMaxBandwidthOut ?? 0) !==
+            (news.internetMaxBandwidthOut ?? 0)
+          ) {
+            yield* retryingSdkCall("ECS", "ModifyInstanceSpec", () =>
+              clients.ecs.modifyInstanceSpec(
+                new ECS.ModifyInstanceSpecRequest({
+                  instanceId,
+                  internetMaxBandwidthOut: news.internetMaxBandwidthOut ?? 0,
+                }),
+              ),
+            );
+          }
           if (
             (news.description !== undefined &&
               value.description !== news.description) ||
@@ -426,6 +507,11 @@ export const InstanceProvider = (
               read: get(instanceId),
               ready: (value) =>
                 running(value) &&
+                value.instanceType === news.instanceType &&
+                isDeepStrictEqual(
+                  sorted(value.securityGroupIds?.securityGroupId ?? []),
+                  sorted(news.securityGroupIds),
+                ) &&
                 ((news.internetMaxBandwidthOut ?? 0) === 0 ||
                   !!value.publicIpAddress?.ipAddress?.[0]) &&
                 (news.description === undefined ||

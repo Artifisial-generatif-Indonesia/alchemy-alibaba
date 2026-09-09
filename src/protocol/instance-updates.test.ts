@@ -11,7 +11,6 @@ import {
   protocolStack,
 } from "./stack.ts";
 import { assertNoSecrets } from "./redaction.ts";
-
 const create = {
   engine: "PostgreSQL" as const,
   engineVersion: "16.0",
@@ -21,8 +20,98 @@ const create = {
   payType: "Serverless" as const,
   securityIPList: "127.0.0.1",
 };
-
-describe("Instance mutation protocol", { timeout: 30_000 }, () => {
+describe("Instance mutation protocol", { timeout: 30000 }, () => {
+  it("restores into a distinct managed instance while leaving the source intact", async () => {
+    await withTempDir((directory) =>
+      withProtocolHarness(async ({ server, world }) => {
+        const options = protocolMakeOptions(server.host, directory);
+        const stack = protocolStack(
+          "RdsRestore",
+          options,
+          Effect.gen(function* () {
+            const source = yield* RDS.Instance("source", {
+              ...create,
+              name: "restore-source",
+            });
+            const restored = yield* RDS.Instance("restored", {
+              ...create,
+              name: "restore-target",
+              restoreFrom: {
+                instanceId: source.instanceId,
+                backupId: "backup-test",
+              },
+            });
+            return { source: source.instanceId, restored: restored.instanceId };
+          }),
+        );
+        const first = await deployProtocol(options, stack);
+        expect(first.source).not.toBe(first.restored);
+        expect(world.rds.size).toBe(2);
+        expect(await deployProtocol(options, stack)).toEqual(first);
+        expect(
+          world.actions().filter((action) => action === "CloneDBInstance"),
+        ).toHaveLength(1);
+        expect(
+          world.actions().filter((action) => action === "CreateDBInstance"),
+        ).toHaveLength(1);
+        await destroyProtocol(options, stack);
+        expect(world.rds.size).toBe(0);
+      }),
+    );
+  });
+  it("repairs backup drift and reports pending parameter restarts", async () => {
+    await withTempDir((directory) =>
+      withProtocolHarness(async ({ server, world }) => {
+        const options = protocolMakeOptions(server.host, directory);
+        const stack = (restart = false) =>
+          protocolStack(
+            "RdsConfiguration",
+            options,
+            RDS.Instance("database", {
+              name: "configured-db",
+              ...create,
+              backupPolicy: {
+                backupRetentionPeriod: 7,
+                preferredBackupPeriod: "Monday,Wednesday,Friday",
+                preferredBackupTime: "02:00Z-03:00Z",
+              },
+              parameters: { max_connections: "200" },
+              restartForParameterChanges: restart,
+              maintenanceWindow: "04:00Z-05:00Z",
+            }),
+          );
+        const first = await deployProtocol(options, stack(false));
+        expect(first.backupPolicy?.backupRetentionPeriod).toBe(7);
+        expect(first.pendingRestartParameters).toEqual(["max_connections"]);
+        const mutations = () =>
+          world
+            .actions()
+            .filter(
+              (action) =>
+                !action.startsWith("Describe") && !action.startsWith("List"),
+            );
+        const before = mutations();
+        expect((await deployProtocol(options, stack(false))).instanceId).toBe(
+          first.instanceId,
+        );
+        expect(mutations()).toEqual(before);
+        world.rds.get(first.instanceId)!.backupPolicy!.BackupRetentionPeriod =
+          1;
+        expect(
+          (await deployProtocol(options, stack(false))).backupPolicy
+            ?.backupRetentionPeriod,
+        ).toBe(7);
+        expect(
+          (await deployProtocol(options, stack(true))).pendingRestartParameters,
+        ).toEqual([]);
+        expect(world.rds.size).toBe(1);
+        expect(
+          world.actions().filter((action) => action === "CreateDBInstance"),
+        ).toHaveLength(1);
+        await destroyProtocol(options, stack(true));
+      }),
+    );
+  });
   it("waits for RDS resize and SSL completion, rotates key material, and cycles protection", async () => {
     await withTempDir((directory) =>
       withProtocolHarness(async ({ server, world }) => {
@@ -35,15 +124,13 @@ describe("Instance mutation protocol", { timeout: 30_000 }, () => {
             Effect.gen(function* () {
               const instance = yield* RDS.Instance("instance", {
                 name: "protocol-rds",
-                create,
+                ...create,
                 deletionProtection: revision !== 1,
-                spec: {
-                  DBInstanceClass: revision ? "class-b" : "class-a",
-                  serverlessConfiguration: {
-                    minCapacity: revision ? 1 : 0.5,
-                    maxCapacity: 2,
-                    autoPause: !!revision,
-                  },
+                DBInstanceClass: revision ? "class-b" : "class-a",
+                serverlessConfig: {
+                  minCapacity: revision ? 1 : 0.5,
+                  maxCapacity: 2,
+                  autoPause: !!revision,
                 },
                 ssl: {
                   SSLEnabled: 1,
@@ -106,7 +193,6 @@ describe("Instance mutation protocol", { timeout: 30_000 }, () => {
       }),
     );
   });
-
   it("fails RDS reconciliation when the asynchronous SSL operation fails", async () => {
     await withTempDir((directory) =>
       withProtocolHarness(async ({ server, world }) => {
@@ -118,7 +204,7 @@ describe("Instance mutation protocol", { timeout: 30_000 }, () => {
           Effect.gen(function* () {
             yield* RDS.Instance("instance", {
               name: "protocol-ssl-failure",
-              create,
+              ...create,
               ssl: { SSLEnabled: 1, CAType: "aliyun" },
             });
             return {};
@@ -134,7 +220,6 @@ describe("Instance mutation protocol", { timeout: 30_000 }, () => {
       }),
     );
   });
-
   it("resizes Tair A to B to A with distinct operation tokens and rotates the default password", async () => {
     await withTempDir((directory) =>
       withProtocolHarness(async ({ server, world }) => {
@@ -146,12 +231,9 @@ describe("Instance mutation protocol", { timeout: 30_000 }, () => {
             Effect.gen(function* () {
               const instance = yield* Tair.Instance("instance", {
                 name: "protocol-resize",
-                create: {
-                  instanceClass: "class-a",
-                  instanceType: "Redis",
-                  chargeType: "PostPaid",
-                },
-                spec: { instanceClass: size },
+                instanceClass: size,
+                instanceType: "Redis",
+                chargeType: "PostPaid",
                 password: Redacted.make(`protocol-tair-password-${revision}`),
               });
               return { id: instance.instanceId };

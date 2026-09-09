@@ -14,11 +14,7 @@ import {
   protocolMakeOptions,
   protocolStack,
 } from "./stack.ts";
-
-const tairCreate = (
-  vpcId: Input<string>,
-  vSwitchId: Input<string>,
-) => ({
+const tairCreate = (vpcId: Input<string>, vSwitchId: Input<string>) => ({
   instanceType: "Redis",
   engineVersion: "7.0",
   instanceClass: "redis.shard.small.2.ce",
@@ -28,26 +24,36 @@ const tairCreate = (
   vSwitchId,
   zoneId: "ap-southeast-5b",
 });
-
-describe("Alchemy stack protocol lifecycle", { timeout: 30_000 }, () => {
+describe("Alchemy stack protocol lifecycle", { timeout: 30000 }, () => {
   it.each(["retain", "destroy"] as const)(
     "honors %s removal policy when an update removes a resource from the graph",
     async (policy) => {
       const stage = "test-protocol";
       await withTempDir(async (directory) => {
         await withProtocolHarness(async ({ server, world }) => {
-          const options = { ...protocolMakeOptions(server.host, directory), stage };
+          const options = {
+            ...protocolMakeOptions(server.host, directory),
+            stage,
+          };
           const stackName = "ExampleProtocolEnvironmentRetention";
-          const populated = protocolStack(stackName, options, Effect.gen(function* () {
-            return yield* VPC.Network("vpc", {
-              name: `protocol-${stage}-vpc`,
-              cidrBlock: "10.40.0.0/16",
-            });
-          }).pipe(Effect.provideService(RemovalPolicy, policy)));
+          const populated = protocolStack(
+            stackName,
+            options,
+            Effect.gen(function* () {
+              return yield* VPC.Network("vpc", {
+                name: `protocol-${stage}-vpc`,
+                cidrBlock: "10.40.0.0/16",
+              });
+            }).pipe(Effect.provideService(RemovalPolicy, policy)),
+          );
           await deployProtocol(options, populated);
           expect(world.networks.size).toBe(1);
           const empty = protocolStack(
-            stackName, options, Effect.succeed({}).pipe(Effect.provideService(RemovalPolicy, policy)),
+            stackName,
+            options,
+            Effect.succeed({}).pipe(
+              Effect.provideService(RemovalPolicy, policy),
+            ),
           );
           await deployProtocol(options, empty);
           expect(world.networks.size).toBe(policy === "retain" ? 1 : 0);
@@ -55,7 +61,6 @@ describe("Alchemy stack protocol lifecycle", { timeout: 30_000 }, () => {
       });
     },
   );
-
   it("creates, reuses persisted state, and tears down to zero", async () => {
     await withTempDir(async (directory) => {
       await withProtocolHarness(
@@ -78,7 +83,7 @@ describe("Alchemy stack protocol lifecycle", { timeout: 30_000 }, () => {
               const tair = yield* Tair.Instance("tair", {
                 name: "protocol-stack-tair",
                 password: Redacted.make("ProtocolPass1!"),
-                create: tairCreate(network.vpcId, vswitch.vSwitchId),
+                ...tairCreate(network.vpcId, vswitch.vSwitchId),
                 ssl: "Enable",
                 evictionPolicy: "noeviction",
                 vpcAuthMode: "Open",
@@ -108,7 +113,6 @@ describe("Alchemy stack protocol lifecycle", { timeout: 30_000 }, () => {
       );
     });
   });
-
   it("recovers an accepted create that was not persisted by Alchemy", async () => {
     await withTempDir(async (directory) => {
       await withProtocolHarness(async ({ server, world, clients }) => {
@@ -137,7 +141,7 @@ describe("Alchemy stack protocol lifecycle", { timeout: 30_000 }, () => {
           Effect.gen(function* () {
             const tair = yield* Tair.Instance("tair", {
               name: "protocol-restart-tair",
-              create: tairCreate("vpc-external", "vsw-external"),
+              ...tairCreate("vpc-external", "vsw-external"),
             });
             return { instanceId: tair.instanceId };
           }),
@@ -149,7 +153,6 @@ describe("Alchemy stack protocol lifecycle", { timeout: 30_000 }, () => {
       });
     });
   });
-
   it("treats a duplicate tokenized create as the same instance", async () => {
     await withProtocolHarness(async ({ clients, world }) => {
       const request = new TairSdk.CreateInstanceRequest({
@@ -167,7 +170,6 @@ describe("Alchemy stack protocol lifecycle", { timeout: 30_000 }, () => {
       expect(world.tairCreates()).toBe(2);
     });
   });
-
   it("retains parent VPC and vSwitch state when Tair destruction fails", async () => {
     await withTempDir(async (directory) => {
       await withProtocolHarness(async ({ server, world }) => {
@@ -193,7 +195,7 @@ describe("Alchemy stack protocol lifecycle", { timeout: 30_000 }, () => {
             });
             yield* Tair.Instance("tair", {
               name: "protocol-retain-tair",
-              create: tairCreate(network.vpcId, vswitch.vSwitchId),
+              ...tairCreate(network.vpcId, vswitch.vSwitchId),
             });
             return { vpcId: network.vpcId, vswitchId: vswitch.vSwitchId };
           }),

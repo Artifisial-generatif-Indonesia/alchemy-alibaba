@@ -7,6 +7,7 @@ import ACKClientImport from "@alicloud/cs20151215";
 import { $OpenApiUtil } from "@alicloud/openapi-core";
 import TairClientImport from "@alicloud/r-kvstore20150101";
 import RDSClientImport from "@alicloud/rds20140815";
+import RAMClientImport from "@alicloud/ram20150501";
 import VPCClientImport from "@alicloud/vpc20160428";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
@@ -32,6 +33,7 @@ type ACKClient = InstanceType<typeof ACKClientImport>;
 type Credential = InstanceType<typeof CredentialImport>;
 type RDSClient = InstanceType<typeof RDSClientImport>;
 type TairClient = InstanceType<typeof TairClientImport>;
+type RAMClient = InstanceType<typeof RAMClientImport>;
 type VPCClient = InstanceType<typeof VPCClientImport>;
 
 // Keep the SDK's documented defaults explicit so every provider request is
@@ -47,6 +49,7 @@ const ACKClient = interopDefault(ACKClientImport);
 const Credential = interopDefault(CredentialImport);
 const RDSClient = interopDefault(RDSClientImport);
 const TairClient = interopDefault(TairClientImport);
+const RAMClient = interopDefault(RAMClientImport);
 const VPCClient = interopDefault(VPCClientImport);
 
 export interface AlibabaEndpoints {
@@ -56,6 +59,7 @@ export interface AlibabaEndpoints {
   readonly tair?: string;
   readonly rds?: string;
   readonly vpc?: string;
+  readonly ram?: string;
 }
 
 export interface AlibabaClientOptions {
@@ -79,6 +83,7 @@ export interface AlibabaClientSet {
   readonly tair: TairClient;
   readonly rds: RDSClient;
   readonly vpc: VPCClient;
+  readonly ram: RAMClient;
   readonly regionId: string;
 }
 
@@ -121,6 +126,7 @@ export const makeClients = (
       ALIBABA_RDS_DEFAULT_READ_TIMEOUT_MS,
     ),
   ),
+  ram: new RAMClient(clientConfig(options, options.endpoints?.ram)),
   vpc: new VPCClient(clientConfig(options, options.endpoints?.vpc)),
   regionId: options.regionId,
 });
@@ -143,6 +149,7 @@ const environmentOptions = Config.all({
   acrEndpoint: Config.option(Config.string("ALIBABA_CLOUD_ACR_ENDPOINT")),
   tairEndpoint: Config.option(Config.string("ALIBABA_CLOUD_TAIR_ENDPOINT")),
   rdsEndpoint: Config.option(Config.string("ALIBABA_CLOUD_RDS_ENDPOINT")),
+  ramEndpoint: Config.option(Config.string("ALIBABA_CLOUD_RAM_ENDPOINT")),
   vpcEndpoint: Config.option(Config.string("ALIBABA_CLOUD_VPC_ENDPOINT")),
 });
 
@@ -180,6 +187,10 @@ export const clientsFromEnvironment = () =>
           rds:
             options.rdsEndpoint._tag === "Some"
               ? options.rdsEndpoint.value
+              : undefined,
+          ram:
+            options.ramEndpoint._tag === "Some"
+              ? options.ramEndpoint.value
               : undefined,
           vpc:
             options.vpcEndpoint._tag === "Some"

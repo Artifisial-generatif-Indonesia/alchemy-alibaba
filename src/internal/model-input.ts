@@ -32,3 +32,15 @@ export type ModelInput<T> = T extends FunctionMember
         : T;
 
 export type Without<T, Keys extends PropertyKey> = Omit<ModelInput<T>, Keys>;
+
+/** Select the SDK's root fields without copying resource lifecycle options. */
+export const modelFields = <T extends object>(
+  value: object,
+  model: { types(): Record<string, unknown> },
+  excluded: readonly string[] = [],
+): T =>
+  Object.fromEntries(
+    Object.entries(value).filter(
+      ([key]) => key in model.types() && !excluded.includes(key),
+    ),
+  ) as T;

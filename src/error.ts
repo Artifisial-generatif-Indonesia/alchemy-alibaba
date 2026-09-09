@@ -11,6 +11,7 @@ export const AlibabaService = Schema.Literals([
   "Tair",
   "RDS",
   "VPC",
+  "RAM",
 ]);
 
 export type AlibabaService = typeof AlibabaService.Type;
@@ -231,8 +232,23 @@ export const isRetryableObservation = (error: unknown): boolean =>
   (isTransient(error) || error.code === "SafeRetryBudgetExceeded");
 
 const absentResourceCodes: Record<AlibabaService, ReadonlySet<string>> = {
-  ECS: new Set(["InvalidInstanceId.NotFound", "InvalidSecurityGroupId.NotFound", "InvalidSecurityGroupRuleId.NotFound"]),
+  RAM: new Set([
+    "EntityNotExist.Role",
+    "EntityNotExist.Policy",
+    "EntityNotExist.PolicyVersion",
+  ]),
+  ECS: new Set([
+    "InvalidDiskId.NotFound",
+    "InvalidKeyPair.NotFound",
+    "InvalidInstanceId.NotFound",
+    "InvalidSecurityGroupId.NotFound",
+    "InvalidSecurityGroupRuleId.NotFound",
+  ]),
   VPC: new Set([
+    "InvalidAllocationId.NotFound",
+    "InvalidNatGatewayId.NotFound",
+    "InvalidSnatEntryId.NotFound",
+    "InvalidSnatTableId.NotFound",
     "InvalidVpcId.NotFound",
     "InvalidVSwitchId.NotFound",
     "InvalidVswitchId.NotFound",

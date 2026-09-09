@@ -3,10 +3,8 @@ import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Alibaba from "../src/index.ts";
-
 // Run from a dedicated private working directory. Local state contains secrets.
 process.umask(0o077);
-
 export default Alchemy.Stack(
   "AlibabaRdsSmoke",
   {
@@ -58,20 +56,18 @@ export default Alchemy.Stack(
             }
           : undefined,
       tags,
-      create: {
-        engine: "PostgreSQL",
-        engineVersion: config.version,
-        DBInstanceClass: config.instanceClass,
-        DBInstanceStorage: config.storage,
-        DBInstanceStorageType: config.storageType,
-        DBInstanceNetType: "Intranet",
-        category: "Basic",
-        payType: "Postpaid",
-        VPCId: network.vpcId,
-        vSwitchId: subnet.vSwitchId,
-        zoneId: config.zoneId,
-        securityIPList: "127.0.0.1",
-      },
+      engine: "PostgreSQL",
+      engineVersion: config.version,
+      DBInstanceClass: config.instanceClass,
+      DBInstanceStorage: config.storage,
+      DBInstanceStorageType: config.storageType,
+      DBInstanceNetType: "Intranet",
+      category: "Basic",
+      payType: "Postpaid",
+      VPCId: network.vpcId,
+      vSwitchId: subnet.vSwitchId,
+      zoneId: config.zoneId,
+      securityIPList: "127.0.0.1",
     });
     const ipGroup =
       config.runnerIp._tag === "Some"
@@ -79,13 +75,7 @@ export default Alchemy.Stack(
             instanceId: instance.instanceId,
             name: "smoke_runner",
             securityIps: [
-              `${yield* Schema.decodeUnknownEffect(
-                Schema.String.check(
-                  Schema.isPattern(
-                    /^(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])$/,
-                  ),
-                ),
-              )(config.runnerIp.value).pipe(Effect.orDie)}/32`,
+              `${yield* Schema.decodeUnknownEffect(Schema.String.check(Schema.isPattern(/^(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])$/)))(config.runnerIp.value).pipe(Effect.orDie)}/32`,
             ],
           })
         : undefined;
