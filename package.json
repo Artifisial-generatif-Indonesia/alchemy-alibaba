@@ -10,7 +10,7 @@
   },
   "engines": {
     "node": ">=22.12.0",
-    "npm": ">=11.19.1"
+    "pnpm": ">=11"
   },
   "exports": {
     ".": {
@@ -78,11 +78,11 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "check": "npm run typecheck && npm test && npm run build",
-    "prepare": "npm run build",
-    "check:security": "npm audit --audit-level=moderate",
+    "check": "pnpm run typecheck && pnpm test && pnpm run build",
+    "prepare": "pnpm run build",
+    "check:security": "pnpm audit --audit-level=moderate",
     "check:package": "node scripts/prepare-release.mjs",
-    "release:prepare": "npm run check && npm run check:security && npm run check:package",
+    "release:prepare": "pnpm run check && pnpm run check:security && pnpm run check:package",
     "release:publish": "node scripts/publish-release.mjs"
   },
   "dependencies": {
@@ -109,13 +109,7 @@
     "typescript": "6.0.3",
     "vitest": "4.1.11"
   },
-  "overrides": {
-    "lodash": "4.18.1",
-    "hono": "4.13.7",
-    "@hono/node-server": "1.19.17",
-    "valibot": "1.4.2"
-  },
-  "packageManager": "npm@11.19.1",
+  "packageManager": "pnpm@11.25.0",
   "publishConfig": {
     "access": "public",
     "tag": "latest",

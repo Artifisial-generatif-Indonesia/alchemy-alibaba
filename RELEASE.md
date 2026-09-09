@@ -6,20 +6,20 @@ Candidate: `alchemy-alibaba@0.2.0`, npm channel `latest`, GitHub tag
 
 ## Preparation (no publication)
 
-Use Node 22.22.1 and npm 11.19.1, then run from the repository root:
+Use Node 22.22.1 and pnpm (selected by `packageManager`), then run from the repository root:
 
 ```sh
-npx --yes npm@11.19.1 ci
-npx --yes npm@11.19.1 run release:prepare
+pnpm install --frozen-lockfile
+pnpm run release:prepare
 ```
 
 This runs type checking, the local test suite, build, and the repository security
 audit. It then rebuilds into an empty `dist`, packs the exact npm artifact,
 checks its complete file list and exports, and installs that tarball in a
-fresh temporary consumer with the required peers and overrides. All public
+fresh temporary consumer with the required peers and pnpm workspace overrides. All public
 imports, consumer TypeScript usage, and the consumer audit must pass.
 
-The package step can also run as `npm run check:package` after the source checks.
+The package step can also run as `pnpm run check:package` after the source checks.
 CI runs it after the source/security gates. All SDK tests use loopback;
 preparation contacts npm for installation/auditing but performs no cloud operations.
 
@@ -40,17 +40,17 @@ access. Confirm those with the intended publisher before the first publication.
 
 Clone the repository and check out the reviewed release commit whose CI passed.
 Use Node 22.22.1 and log in once with
-`npx --yes npm@11.19.1 login --registry=https://registry.npmjs.org/`.
+`pnpm login --registry=https://registry.npmjs.org/`.
 Then run this single command from the clean checkout:
 
 ```sh
-npx --yes npm@11.19.1 run release:publish
+pnpm run release:publish
 ```
 
-It checks npm authentication, runs `npm ci` and `release:prepare`, verifies the
+It checks npm authentication, runs `pnpm install --frozen-lockfile` and `release:prepare`, verifies the
 tarball against both its SHA-256 checksum and npm integrity, publishes that exact
 tarball publicly to `latest`, and checks the published integrity and tag.
-The npm login/2FA prompts use your terminal. No token is stored in the repository.
+The pnpm login/2FA prompts use your terminal. No token is stored in the repository.
 The command requires no preinstalled project dependencies and uses the version
 from `package.json`. It stops on failure and never retries publication automatically.
 It publishes to npm; Git tags and GitHub releases remain the steps below.
@@ -59,7 +59,7 @@ To exercise the same preparation and checksum checks without publishing or
 requiring npm login:
 
 ```sh
-npx --yes npm@11.19.1 run release:publish -- --dry-run
+pnpm run release:publish --dry-run
 ```
 
 ## Manual publication
@@ -78,7 +78,7 @@ sha256sum --check SHA256SUMS
 Publish the verified tarball, explicitly selecting the release channel:
 
 ```sh
-npx --yes npm@11.19.1 publish ./alchemy-alibaba-0.2.0.tgz --tag latest --access public --registry=https://registry.npmjs.org/
+pnpm publish ./alchemy-alibaba-0.2.0.tgz --tag latest --access public --registry=https://registry.npmjs.org/
 ```
 
 The package also sets `publishConfig.tag` to `latest`.
@@ -104,5 +104,5 @@ Finally, verify the npm `latest` tag and integrity, install the registry version
 in a fresh consumer using the README overrides, and confirm the GitHub release
 is a normal release. Record the final version, commit, integrity, and URLs.
 
-References: [npm publish](https://docs.npmjs.com/cli/v11/commands/npm-publish/)
+References: [pnpm publish](https://pnpm.io/cli/publish)
 and [publishConfig](https://docs.npmjs.com/cli/v11/configuring-npm/package-json/#publishconfig).

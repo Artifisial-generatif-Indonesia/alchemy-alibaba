@@ -8,6 +8,9 @@ not claimed.
 
 ### Changes
 
+- Use pnpm for installation, CI, package validation, and single-command
+  publishing with `pnpm run release:publish` (or `--dry-run` to rehearse).
+
 - Recognize ACK `ErrorNodePoolNotFound` as successful absence during cleanup.
   Document that forced node-pool deletion can still honor disruption budgets.
 
@@ -98,8 +101,8 @@ could not be independently verified because RAM read permissions were denied.
 
 ### Compatibility and limitations
 
-- Use Node 22 (at least 22.12.0) and npm 11.19.1; release validation uses
-  Node 22.22.1. Alchemy and Effect remain prerelease dependencies.
+- Use Node 22 and pnpm; release validation uses Node 22.22.1 and the
+  `packageManager` version. Alchemy and Effect remain prerelease dependencies.
 - Set the root dependency overrides in README before installing. Library
   overrides are not inherited by applications. Commit and audit your lockfile.
 - PostgreSQL `AccountPrivilege` cannot revoke ordinary ownership through the
