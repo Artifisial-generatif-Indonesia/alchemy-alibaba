@@ -161,6 +161,16 @@ const tagRecord = (
 const tagList = (tags: Readonly<Record<string, string>>) =>
   Object.entries(tags).map(([key, value]) => ({ key, value }));
 
+// Create/modify use MASTER_SLAVE or STAND_ALONE for cloud-native instances,
+// while DescribeInstanceAttribute reports the equivalent double or single.
+// Normalize only comparisons; preserve the requested vocabulary on the wire.
+const observedNodeType = (value: string | undefined) =>
+  value === "MASTER_SLAVE"
+    ? "double"
+    : value === "STAND_ALONE"
+      ? "single"
+      : value;
+
 const specMatches = (
   instance: ObservedInstance,
   spec: SpecSettings | undefined,
@@ -170,7 +180,9 @@ const specMatches = (
     spec.instanceClass === instance.instanceClass) &&
     (spec.majorVersion === undefined ||
       spec.majorVersion === instance.engineVersion) &&
-    (spec.nodeType === undefined || spec.nodeType === instance.nodeType) &&
+    (spec.nodeType === undefined ||
+      observedNodeType(spec.nodeType) ===
+        observedNodeType(instance.nodeType)) &&
     (spec.readOnlyCount === undefined ||
       spec.readOnlyCount === instance.readOnlyCount) &&
     (spec.replicaCount === undefined ||
@@ -770,10 +782,17 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
                 news.spec,
                 yield* Effect.sync(randomUUID),
               );
+            // Cloud-native Redis 7 rejects MajorVersion even during a
+            // size-only change. Do not request an unchanged upgrade.
+            const majorVersion =
+              news.spec.majorVersion === instance.engineVersion
+                ? undefined
+                : news.spec.majorVersion;
             yield* requestMutation("ModifyInstanceSpec", () =>
               clients.tair.modifyInstanceSpec(
                 new Tair.ModifyInstanceSpecRequest({
                   ...news.spec,
+                  majorVersion,
                   instanceId,
                   clientToken: token,
                 }),

@@ -209,7 +209,14 @@ describe("Child resource SDK protocol lifecycles", { timeout: 30000 }, () => {
             }),
           );
         const first = await deployProtocol(options, stack(0));
+        expect(first.name).toMatch(/^[a-z][a-z0-9_]{31}$/);
         expect(await deployProtocol(options, stack(0))).toEqual(first);
+        for (const action of [
+          "ModifyAccountDescription",
+          "ResetAccountPassword",
+          "ModifySecurityIps",
+        ])
+          world.script({ action, code: "IncorrectDBInstanceState" });
         expect(await deployProtocol(options, stack(1))).toEqual(first);
         expect(world.resources.passwordResets).toBe(1);
         expect(
@@ -220,6 +227,8 @@ describe("Child resource SDK protocol lifecycles", { timeout: 30000 }, () => {
             .filter((x) => x.action === "DescribeAccounts")
             .every((x) => x.version === "2015-01-01"),
         ).toBe(true);
+        for (const action of ["DeleteAccount", "ModifySecurityIps"])
+          world.script({ action, code: "IncorrectDBInstanceState" });
         await destroyProtocol(options, stack(1));
         expect(world.resources.accounts.size).toBe(0);
         expect(world.resources.groups.size).toBe(0);

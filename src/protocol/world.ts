@@ -48,6 +48,7 @@ type RdsStatus = "Creating" | "Running" | "Deleting" | "Modifying";
 type AckState = "creating" | "running" | "deleting";
 
 interface TairRecord {
+  nodeType?: string;
   instanceClass: string;
   engineVersion?: string;
   instanceId: string;
@@ -105,6 +106,7 @@ interface RdsRecord {
   backupPolicy?: Record<string, unknown>;
   parameters?: Record<string, string>;
   runningParameters?: Record<string, string>;
+  maxConnections?: number;
   maintainTime?: string;
   deletionProtection: boolean;
   ssl: Record<string, unknown>;
@@ -359,6 +361,12 @@ export class ProtocolWorld {
       case "ModifyInstanceSpec": {
         const record = this.tair.get(params.InstanceId ?? "");
         if (!record) return errorBody("InvalidInstanceId.NotFound", "absent");
+        if (params.MajorVersion === "7.0")
+          return errorBody(
+            "InvalidParameter",
+            'The specified parameter "MajorVersion" is not valid.',
+          );
+        record.nodeType = params.NodeType ?? record.nodeType;
         record.instanceClass = params.InstanceClass ?? record.instanceClass;
         record.engineVersion = params.MajorVersion ?? record.engineVersion;
         return ok({});
@@ -465,6 +473,7 @@ export class ProtocolWorld {
           ),
         });
         return ok({
+          Engine: record.engine,
           ConfigParameters: parameters(record.parameters),
           RunningParameters: parameters(record.runningParameters),
         });
@@ -479,6 +488,18 @@ export class ProtocolWorld {
         };
         if (params.Forcerestart === "true")
           record.runningParameters = { ...record.parameters };
+        const configured = record.parameters;
+        if (
+          record.engine === "MySQL" &&
+          configured?.max_connections !== undefined
+        ) {
+          record.maxConnections = Number(configured.max_connections);
+          record.runningParameters = {
+            ...record.runningParameters,
+            max_connections: String(record.maxConnections + 520),
+          };
+          delete configured.max_connections;
+        }
         return ok({});
       }
       case "ModifyDBInstanceMaintainTime": {
@@ -863,6 +884,7 @@ export class ProtocolWorld {
     const name = param(params, "InstanceName") ?? instanceId;
     const vSwitchId = param(params, "VSwitchId");
     const record: TairRecord = {
+      nodeType: param(params, "NodeType"),
       instanceClass: param(params, "InstanceClass") ?? "redis.test",
       engineVersion: param(params, "EngineVersion"),
       instanceId,
@@ -1010,6 +1032,12 @@ export class ProtocolWorld {
             ...(omitIdentity
               ? {}
               : { InstanceId: record.instanceId, InstanceName: record.name }),
+            NodeType:
+              record.nodeType === "MASTER_SLAVE"
+                ? "double"
+                : record.nodeType === "STAND_ALONE"
+                  ? "single"
+                  : record.nodeType,
             InstanceClass: record.instanceClass,
             EngineVersion: record.engineVersion,
             InstanceStatus: record.status,
@@ -1302,6 +1330,7 @@ export class ProtocolWorld {
             Category: record.category,
             ServerlessConfig: record.serverless,
             CompressionMode: record.compressionMode,
+            MaxConnections: record.maxConnections,
             MaintainTime: record.maintainTime,
             Engine: record.engine,
             DBInstanceId: record.instanceId,

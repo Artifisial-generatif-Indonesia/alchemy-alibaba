@@ -59,6 +59,52 @@ describe("Instance mutation protocol", { timeout: 30000 }, () => {
       }),
     );
   });
+  it("reads MySQL max_connections without counting reserved management connections", async () => {
+    await withTempDir((directory) =>
+      withProtocolHarness(async ({ server, world }) => {
+        const options = protocolMakeOptions(server.host, directory);
+        const stack = (limit: string) =>
+          protocolStack(
+            "MysqlConnectionLimit",
+            options,
+            RDS.Instance("database", {
+              ...create,
+              engine: "MySQL",
+              engineVersion: "8.0",
+              payType: "Postpaid",
+              parameters: { max_connections: limit },
+              restartForParameterChanges: true,
+            }),
+          );
+        const first = await deployProtocol(options, stack("128"));
+        expect(first.parameters?.max_connections).toBe("128");
+        expect(first.pendingRestartParameters).toEqual([]);
+        const record = world.rds.get(first.instanceId)!;
+        expect(record.runningParameters?.max_connections).toBe("648");
+        const updates = () =>
+          world.actions().filter((a) => a === "ModifyParameter").length;
+        const before = updates();
+        expect((await deployProtocol(options, stack("128"))).instanceId).toBe(
+          first.instanceId,
+        );
+        expect(updates()).toBe(before);
+        // Same desired input must repair real drift in the user connection limit.
+        record.maxConnections = 200;
+        record.runningParameters!.max_connections = "720";
+        expect(
+          (await deployProtocol(options, stack("128"))).parameters
+            ?.max_connections,
+        ).toBe("128");
+        expect(updates()).toBe(before + 1);
+        expect(
+          (await deployProtocol(options, stack("160"))).parameters
+            ?.max_connections,
+        ).toBe("160");
+        await destroyProtocol(options, stack("160"));
+      }),
+    );
+  });
+
   it("repairs backup drift and reports pending parameter restarts", async () => {
     await withTempDir((directory) =>
       withProtocolHarness(async ({ server, world }) => {
@@ -220,6 +266,52 @@ describe("Instance mutation protocol", { timeout: 30000 }, () => {
       }),
     );
   });
+  it.each([
+    ["MASTER_SLAVE", "STAND_ALONE"],
+    ["STAND_ALONE", "MASTER_SLAVE"],
+  ])(
+    "compares Tair %s against the detail API node type vocabulary",
+    async (initialType, nextType) => {
+      await withTempDir((directory) =>
+        withProtocolHarness(async ({ server, world }) => {
+          const options = protocolMakeOptions(server.host, directory);
+          const stack = (nodeType: string) =>
+            protocolStack(
+              "TairNodeType",
+              options,
+              Effect.gen(function* () {
+                const instance = yield* Tair.Instance("instance", {
+                  instanceClass: "redis.test",
+                  instanceType: "Redis",
+                  chargeType: "PostPaid",
+                  nodeType,
+                });
+                return { id: instance.instanceId };
+              }),
+            );
+          const initial = await deployProtocol(options, stack(initialType));
+          expect(
+            world.actions().filter((action) => action === "ModifyInstanceSpec"),
+          ).toHaveLength(0);
+          expect(await deployProtocol(options, stack(nextType))).toEqual(
+            initial,
+          );
+          expect([...world.tair.values()][0]?.nodeType).toBe(nextType);
+          expect(
+            world.actions().filter((action) => action === "ModifyInstanceSpec"),
+          ).toHaveLength(1);
+          expect(await deployProtocol(options, stack(nextType))).toEqual(
+            initial,
+          );
+          expect(
+            world.actions().filter((action) => action === "ModifyInstanceSpec"),
+          ).toHaveLength(1);
+          await destroyProtocol(options, stack(nextType));
+        }),
+      );
+    },
+  );
+
   it("resizes Tair A to B to A with distinct operation tokens and rotates the default password", async () => {
     await withTempDir((directory) =>
       withProtocolHarness(async ({ server, world }) => {
@@ -232,6 +324,7 @@ describe("Instance mutation protocol", { timeout: 30000 }, () => {
               const instance = yield* Tair.Instance("instance", {
                 name: "protocol-resize",
                 instanceClass: size,
+                engineVersion: "7.0",
                 instanceType: "Redis",
                 chargeType: "PostPaid",
                 password: Redacted.make(`protocol-tair-password-${revision}`),

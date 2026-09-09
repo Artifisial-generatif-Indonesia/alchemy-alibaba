@@ -71,9 +71,10 @@ export const DiskAttachmentProvider = (
             clients.regionId,
             output?.regionId,
           );
-          const p = output ?? olds,
-            v = yield* getDisk(clients, p.diskId);
-          return v?.instanceId === p.instanceId
+          const p = output ?? olds;
+          if (!isResolved(p) || !p.diskId || !p.instanceId) return undefined;
+          const v = yield* getDisk(clients, p.diskId);
+          return v !== undefined && v.instanceId === p.instanceId
             ? { ...p, regionId: clients.regionId, device: v.device }
             : undefined;
         }),

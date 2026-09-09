@@ -96,6 +96,10 @@ describe("Example relationship protocol coverage", { timeout: 30000 }, () => {
           expect(
             world.captured.filter((item) => item.action === "CreateDBInstance"),
           ).toHaveLength(1);
+          world.script({
+            action: "DeleteVSwitch",
+            code: "DependencyViolation.Rds",
+          });
           await destroyProtocol(options, stack);
           expect(world.rds.size).toBe(0);
           expect(world.eniDependencyRejections).toBeGreaterThan(0);

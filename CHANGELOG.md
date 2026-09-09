@@ -8,6 +8,19 @@ not claimed.
 
 ### Changes
 
+- Reconcile MySQL `max_connections` against the instance's user limit, excluding
+  Alibaba's reserved management connections from the comparison. Retry delayed
+  `DependencyViolation.Rds` subnet release within the existing cleanup budget.
+- Compare Tair node-type aliases correctly and omit unchanged engine versions
+  from resize requests. Generate Tair account names within the live-tested
+  32-character length; explicit and saved names remain authoritative. Retry
+  idempotent Tair child mutations while parent operations hold the instance lock.
+
+- Recover cleanly from denied parent creation: skip ECS rule, disk attachment,
+  and EIP association reads until their required parent identities resolve.
+  Partial deployment cleanup no longer sends unscoped disk reads, missing
+  security-group requests, or dereferences absent attachment observations.
+
 - Fix named ACK/RDS replacement identity, ambiguous recovery and saved-ID lookup.
   Mutable ACK/RDS desired fields and ECS size/group changes update in place.
 - Separate ACK cluster-edition and configuration updates, waiting for each

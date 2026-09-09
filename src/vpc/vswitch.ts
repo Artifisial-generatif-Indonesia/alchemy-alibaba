@@ -139,7 +139,8 @@ const retryableDeleteDependency = (error: AlibabaProviderError) =>
   (isDependencyViolation(error) &&
     (error.code === "DependencyViolation" ||
       error.code === "DependencyViolation.NetworkInterface" ||
-      error.code === "DependencyViolation.Kvstore")) ||
+      error.code === "DependencyViolation.Kvstore" ||
+      error.code === "DependencyViolation.Rds")) ||
   (error.code !== undefined && transientDeleteCodes.has(error.code));
 
 const modifyMatches = (vswitch: ObservedVSwitch, desired: MutableSettings) =>
@@ -517,7 +518,7 @@ export const VSwitchProvider = (options: VSwitchProviderOptions = {}) =>
         delete: Effect.fn(function* ({ output }) {
           // Managed services can disappear from their own APIs before Alibaba
           // releases their vSwitch attachment. Retry only the generic API
-          // response, explicit ENI/Kvstore dependencies, and documented
+          // response, explicit ENI/Kvstore/RDS dependencies, and documented
           // transient statuses. Permanent dependencies such as a Network ACL
           // stay loud.
           type DeleteDecision = Data.TaggedEnum<{

@@ -8,7 +8,9 @@ import * as Redacted from "effect/Redacted";
 import { AlibabaClients } from "../clients.ts";
 import {
   AlibabaInvariantError,
+  isIncorrectInstanceState,
   isNotFound,
+  isTransient,
   retryingSdkCall,
   sdkCall,
 } from "../error.ts";
@@ -16,6 +18,7 @@ import {
   accountName,
   waitForAbsent,
   waitForPresent,
+  waitUntilAccepted,
   type WaitOptions,
 } from "../internal/lifecycle.ts";
 import type { Without } from "../internal/model-input.ts";
@@ -74,12 +77,32 @@ export interface AccountProviderOptions {
   readonly wait?: WaitOptions;
 }
 
-/** Tair accounts expose no ownership metadata and are silently adoptable. */
+/**
+ * Tair accounts expose no ownership metadata and are silently adoptable.
+ * Generate 32-character names: live Redis 7 cloud-native instances reject the
+ * previous 65-character generated name despite the API's documented 100 limit.
+ * Explicit and already-observed names remain authoritative.
+ */
 export const AccountProvider = (options: AccountProviderOptions = {}) =>
   Provider.effect(
     Account,
     Effect.gen(function* () {
       const clients = yield* AlibabaClients;
+      // Child updates can overlap parent resize/password/configuration work.
+      // These mutations are idempotent; wait for Tair to release its state lock.
+      const requestMutation = <Result>(
+        operation: string,
+        call: () => Promise<Result>,
+      ) =>
+        waitUntilAccepted({
+          service: "Tair",
+          operation,
+          request: sdkCall("Tair", operation, call),
+          retryIf: (error) =>
+            isIncorrectInstanceState(error) || isTransient(error),
+          wait: options.wait,
+        });
+
       const get = (instanceId: string, name: string) =>
         retryingSdkCall("Tair", "DescribeAccounts", () =>
           clients.tair.describeAccounts(
@@ -120,14 +143,14 @@ export const AccountProvider = (options: AccountProviderOptions = {}) =>
         read: Effect.fn(function* ({ id, olds, output }) {
           const instanceId = olds.instanceId ?? output?.instanceId;
           if (instanceId === undefined) return undefined;
-          const name = yield* accountName(id, olds.name ?? output?.name, 100);
+          const name = yield* accountName(id, olds.name ?? output?.name, 32);
           const account = yield* get(instanceId, name);
           return account === undefined
             ? undefined
             : toAttributes(instanceId, name, account);
         }),
         reconcile: Effect.fn(function* ({ id, news, olds, output }) {
-          const name = yield* accountName(id, news.name ?? output?.name, 100);
+          const name = yield* accountName(id, news.name ?? output?.name, 32);
           const settings = news.settings ?? {};
           let account = yield* get(news.instanceId, name);
           if (account === undefined) {
@@ -161,7 +184,7 @@ export const AccountProvider = (options: AccountProviderOptions = {}) =>
               settings.accountDescription !== undefined &&
               account.accountDescription !== settings.accountDescription
             ) {
-              yield* sdkCall("Tair", "ModifyAccountDescription", () =>
+              yield* requestMutation("ModifyAccountDescription", () =>
                 clients.tair.modifyAccountDescription(
                   new Tair.ModifyAccountDescriptionRequest({
                     instanceId: news.instanceId,
@@ -175,7 +198,7 @@ export const AccountProvider = (options: AccountProviderOptions = {}) =>
               olds === undefined ||
               !Equal.equals(olds.password, news.password)
             ) {
-              yield* sdkCall("Tair", "ResetAccountPassword", () =>
+              yield* requestMutation("ResetAccountPassword", () =>
                 clients.tair.resetAccountPassword(
                   new Tair.ResetAccountPasswordRequest({
                     instanceId: news.instanceId,
@@ -207,7 +230,7 @@ export const AccountProvider = (options: AccountProviderOptions = {}) =>
           return toAttributes(news.instanceId, name, account);
         }),
         delete: Effect.fn(function* ({ output }) {
-          yield* retryingSdkCall("Tair", "DeleteAccount", () =>
+          yield* requestMutation("DeleteAccount", () =>
             clients.tair.deleteAccount(
               new Tair.DeleteAccountRequest({
                 instanceId: output.instanceId,

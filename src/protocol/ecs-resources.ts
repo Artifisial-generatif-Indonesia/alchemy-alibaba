@@ -385,6 +385,7 @@ export class EcsResources {
         return ok();
       }
       case "DescribeSecurityGroupAttribute": {
+        if (!p.SecurityGroupId) return error("MissingParameter");
         if (!group) return error("InvalidSecurityGroupId.NotFound");
         const all = [...this.rules.values()]
           .filter((r) => r.group === group.SecurityGroupId)

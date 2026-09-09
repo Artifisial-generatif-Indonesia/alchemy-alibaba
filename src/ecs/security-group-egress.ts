@@ -32,8 +32,7 @@ export interface SecurityGroupEgressProps {
   readonly policy?: "accept" | "drop";
   readonly priority?: number;
 }
-export interface SecurityGroupEgressAttributes
-  extends SecurityGroupEgressProps {
+export interface SecurityGroupEgressAttributes extends SecurityGroupEgressProps {
   readonly regionId: string;
   readonly securityGroupRuleId: string;
 }
@@ -187,14 +186,16 @@ export const SecurityGroupEgressProvider = (
             clients.regionId,
             output?.regionId,
           );
-          const value = yield* get(olds, output?.securityGroupRuleId);
+          const props = output ?? olds;
+          if (!isResolved(props) || !props.securityGroupId) return undefined;
+          const value = yield* get(props, output?.securityGroupRuleId);
           if (
             value !== undefined &&
             output !== undefined &&
-            !matchesRule(value, olds)
+            !matchesRule(value, props)
           )
             return yield* drift();
-          return value === undefined ? undefined : yield* attrs(olds, value);
+          return value === undefined ? undefined : yield* attrs(props, value);
         }),
         reconcile: Effect.fn(function* ({ news, output }) {
           if (

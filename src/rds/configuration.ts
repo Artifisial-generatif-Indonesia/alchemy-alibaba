@@ -104,6 +104,29 @@ export const instanceConfiguration = (
     const running = entries(
       response.body?.runningParameters?.DBInstanceParameter,
     );
+    // MySQL's running max_connections includes Alibaba's reserved management
+    // connections. The instance attribute reports the configurable user limit;
+    // the reservation varies by instance and must not be subtracted as a constant.
+    if (
+      desired.max_connections !== undefined &&
+      response.body?.engine?.toLowerCase() === "mysql"
+    ) {
+      const attributes = yield* retryingSdkCall(
+        "RDS",
+        "DescribeDBInstanceAttribute",
+        () =>
+          clients.rds.describeDBInstanceAttribute(
+            new RDS.DescribeDBInstanceAttributeRequest({
+              DBInstanceId: instanceId,
+            }),
+          ),
+      );
+      const instance = attributes.body?.items?.DBInstanceAttribute?.find(
+        (item) => item.DBInstanceId === instanceId,
+      );
+      if (instance?.maxConnections !== undefined)
+        running.max_connections = String(instance.maxConnections);
+    }
     return {
       parameters: { ...running, ...configured },
       pendingRestartParameters: Object.keys(desired).filter(

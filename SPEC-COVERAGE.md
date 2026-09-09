@@ -148,7 +148,8 @@ checks in `src/internal/model-input.test.ts` cover the audited failures:
   before SSL changes, and applies certificate and redacted key/password
   rotations. Secret inputs without SSL settings fail explicitly.
 - New generated RDS/Tair account names use letters and digits. RDS names fit
-  the conservative 16-character engine limit. Explicit and persisted names
+  the conservative 16-character engine limit; Tair uses a live-tested
+  32-character generated name. Explicit and persisted names
   remain authoritative and are never silently renamed.
 - SDK model index signatures are removed from request inputs while genuine
   dictionaries remain typed. Excluded raw secret fields cannot bypass the

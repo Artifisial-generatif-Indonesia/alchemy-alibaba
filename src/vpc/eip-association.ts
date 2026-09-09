@@ -66,7 +66,8 @@ export const EipAssociationProvider = (
           | undefined,
         props: EipAssociationProps,
       ) =>
-        value?.instanceId === props.instanceId &&
+        value !== undefined &&
+        value.instanceId === props.instanceId &&
         value.instanceType === props.instanceType;
       return {
         version: 1,
@@ -102,10 +103,13 @@ export const EipAssociationProvider = (
             clients.regionId,
             output?.regionId,
           );
-          const value = yield* get(output?.allocationId ?? olds.allocationId);
-          return matches(value, output ?? olds) && value?.ipAddress
+          const props = output ?? olds;
+          if (!isResolved(props) || !props.allocationId || !props.instanceId)
+            return undefined;
+          const value = yield* get(props.allocationId);
+          return matches(value, props) && value?.ipAddress
             ? {
-                ...olds,
+                ...props,
                 regionId: clients.regionId,
                 ipAddress: value.ipAddress,
               }

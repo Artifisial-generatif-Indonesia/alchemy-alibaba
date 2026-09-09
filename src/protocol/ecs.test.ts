@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import * as ECS from "../ecs/index.ts";
 import * as RDS from "../rds/index.ts";
 import * as Tair from "../tair/index.ts";
+import * as VPC from "../vpc/index.ts";
 import { withProtocolHarness, withTempDir } from "./harness.ts";
 import {
   deployProtocol,
@@ -21,6 +22,79 @@ const base = {
 };
 
 describe("ECS real SDK lifecycle", { timeout: 30_000 }, () => {
+  it("destroys a partial deployment when denied parents leave child identities unresolved", async () => {
+    await withTempDir((directory) =>
+      withProtocolHarness(async ({ server, world }) => {
+        const options = protocolMakeOptions(server.host, directory);
+        const stack = protocolStack(
+          "EcsDeniedParents",
+          options,
+          Effect.gen(function* () {
+            const network = yield* VPC.Network("network", {
+              cidrBlock: "10.50.0.0/16",
+            });
+            const group = yield* ECS.SecurityGroup("group", {
+              vpcId: network.vpcId,
+            });
+            yield* ECS.SecurityGroupIngress("ingress", {
+              securityGroupId: group.securityGroupId,
+              ipProtocol: "tcp",
+              portRange: "22/22",
+              sourceCidrIp: "192.0.2.1/32",
+            });
+            yield* ECS.SecurityGroupEgress("egress", {
+              securityGroupId: group.securityGroupId,
+              ipProtocol: "tcp",
+              portRange: "443/443",
+              destCidrIp: "192.0.2.1/32",
+            });
+            const disk = yield* ECS.Disk("disk", {
+              zoneId: "ap-southeast-5a",
+              size: 20,
+            });
+            const vm = yield* ECS.Instance("vm", {
+              ...base,
+              securityGroupIds: [group.securityGroupId],
+            });
+            yield* ECS.DiskAttachment("attachment", {
+              diskId: disk.diskId,
+              instanceId: vm.instanceId,
+            });
+            const eip = yield* VPC.Eip("eip", { bandwidth: 1 });
+            yield* VPC.EipAssociation("association", {
+              allocationId: eip.allocationId,
+              instanceId: vm.instanceId,
+              instanceType: "EcsInstance",
+            });
+          }),
+        );
+        for (const action of ["CreateSecurityGroup", "CreateDisk"])
+          world.script({ action, code: "Forbidden.RAM", statusCode: 403 });
+        await expect(deployProtocol(options, stack)).rejects.toThrow();
+        expect(world.ecs.instances.size).toBe(0);
+        expect(world.connectivity.eips.size).toBe(1);
+        await destroyProtocol(options, stack);
+        expect(world.connectivity.eips.size).toBe(0);
+        expect(world.ecs.groups.size + world.ecs.disks.size).toBe(0);
+        expect(
+          world.ecs.requests.filter(
+            (r) =>
+              r.action === "DescribeDisks" &&
+              !r.params.DiskIds &&
+              !r.params.DiskName,
+          ),
+        ).toHaveLength(0);
+        expect(
+          world.ecs.requests.filter(
+            (r) =>
+              r.action === "DescribeSecurityGroupAttribute" &&
+              !r.params.SecurityGroupId,
+          ),
+        ).toHaveLength(0);
+      }),
+    );
+  });
+
   it("preserves an independent disk across VM replacement and imports only a public key", async () => {
     await withTempDir((directory) =>
       withProtocolHarness(async ({ server, world }) => {
