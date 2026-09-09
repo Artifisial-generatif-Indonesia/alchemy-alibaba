@@ -77,8 +77,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "check": "pnpm run typecheck && pnpm test && pnpm run build",
+    "test": "vitest run --exclude \"packages/**\"",
+    "check": "pnpm run typecheck && pnpm test && pnpm run build && pnpm --filter alibaba-rds-access run check",
     "prepare": "pnpm run build",
     "check:security": "pnpm audit --audit-level=moderate",
     "check:package": "node scripts/prepare-release.mjs",

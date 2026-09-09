@@ -20,3 +20,4 @@ jobs:
       - run: pnpm run check
       - run: pnpm run check:security
       - run: pnpm run check:package
+      - run: pnpm --filter alibaba-rds-access run check:package

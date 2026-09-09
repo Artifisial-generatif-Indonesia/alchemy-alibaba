@@ -1,0 +1,53 @@
+{
+  "name": "alibaba-rds-access",
+  "version": "0.1.0",
+  "description": "Refresh laptop IP access to Alibaba Cloud RDS from the terminal",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Artifisial-generatif-Indonesia/alchemy-alibaba.git",
+    "directory": "packages/rds-access"
+  },
+  "bin": {
+    "rds-access": "./dist/bin.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "pnpm run typecheck && pnpm test && pnpm run build",
+    "check:package": "node scripts/check-package.mjs",
+    "prepack": "pnpm run build"
+  },
+  "dependencies": {
+    "@alicloud/credentials": "2.4.7",
+    "@alicloud/openapi-core": "1.0.8",
+    "@alicloud/rds20140815": "15.9.0",
+    "@effect/platform-node": "4.0.0-rc.112",
+    "effect": "4.0.0-rc.112"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.7",
+    "typescript": "6.0.3",
+    "vitest": "4.1.11"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}

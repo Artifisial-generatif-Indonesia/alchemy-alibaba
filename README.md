@@ -8,6 +8,11 @@ adoption. This release includes the review fixes and new resources described in
 [COMPOSITION.md](COMPOSITION.md), and intentionally breaks the 0.1.0 input API.
 Publishing instructions are in [RELEASE.md](RELEASE.md).
 
+The repository also contains [alibaba-rds-access](packages/rds-access/README.md),
+an independent workspace subpackage for refreshing and revoking a developer
+laptop's RDS IP allowlist entry. It has its own CLI and release and does not
+depend on Alchemy. It is not included in the `alchemy-alibaba` npm package.
+
 The implementation follows Alchemy's unified lifecycle: read live state,
 adopt only according to each API's ownership capabilities, reconcile from the
 observed resource, and make deletion idempotent. Calls that are safe to repeat

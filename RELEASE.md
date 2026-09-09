@@ -1,5 +1,9 @@
 # Preparing and publishing a release
 
+These commands release the root `alchemy-alibaba` provider only. The independent
+`alibaba-rds-access` subpackage has its own version and tarball; see its
+[package instructions](packages/rds-access/README.md#package-maintenance).
+
 Candidate: `alchemy-alibaba@0.2.0`, npm channel `latest`, GitHub tag
 `v0.2.0`. The notes are in [CHANGELOG.md](CHANGELOG.md). The existing
 `v0.1.0` tag must not be moved.
