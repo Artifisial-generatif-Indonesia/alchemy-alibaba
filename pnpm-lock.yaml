@@ -64,6 +64,34 @@ importers:
         specifier: 4.1.11
         version: 4.1.11(@types/node@22.19.7)(vite@8.2.2(@types/node@22.19.7)(yaml@2.9.0))
 
+  packages/rds-access:
+    dependencies:
+      '@alicloud/credentials':
+        specifier: 2.4.7
+        version: 2.4.7
+      '@alicloud/openapi-core':
+        specifier: 1.0.8
+        version: 1.0.8
+      '@alicloud/rds20140815':
+        specifier: 15.9.0
+        version: 15.9.0
+      '@effect/platform-node':
+        specifier: 4.0.0-rc.112
+        version: 4.0.0-rc.112(effect@4.0.0-rc.112)(redis@6.2.1)
+      effect:
+        specifier: 4.0.0-rc.112
+        version: 4.0.0-rc.112
+    devDependencies:
+      '@types/node':
+        specifier: 22.19.7
+        version: 22.19.7
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@types/node@22.19.7)(vite@8.2.2(@types/node@22.19.7)(yaml@2.9.0))
+
 packages:
 
   '@alcalzone/ansi-tokenize@0.2.5':
