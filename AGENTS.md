@@ -1,6 +1,6 @@
 # Alibaba provider development
 
-Use Node 22 and npm. Run `npm ci` and `npm run check`.
+Use Node 22 and pnpm. Run `pnpm install --frozen-lockfile` and `pnpm run check`.
 Keep resource type names, physical naming, ownership tags and lifecycle semantics stable.
 Tests use SDK fakes and loopback simulation. Do not run connected cloud operations without explicit approval.
 Never commit credentials, state, customer data or project-specific account configuration.

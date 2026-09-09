@@ -163,9 +163,9 @@ drives those same clients over HTTP. Protocol tests fail if a request leaves
 loopback. Stack tests persist Alchemy state in a temporary directory.
 
 ```sh
-npx --yes npm@11.19.1 ci
-npm run check
-npm run check:security
+pnpm install --frozen-lockfile
+pnpm run check
+pnpm run check:security
 ```
 
 The [live validation runbook](LIVE-VALIDATION.md) specifies the disposable-stage
@@ -182,41 +182,48 @@ install the exact version below. Set the root overrides in the next section
 **before installing**, then commit the application's lockfile.
 
 ```sh
-npx --yes npm@11.19.1 install --save-exact alchemy-alibaba@0.2.0 alchemy@2.0.0-beta.76 effect@4.0.0-rc.112
+pnpm add --save-exact alchemy-alibaba@0.2.0 alchemy@2.0.0-beta.76 effect@4.0.0-rc.112
 ```
 
 Until publication, install the locally prepared tarball or pin a reviewed full
 GitHub commit. The existing `v0.1.0` Git tag predates these fixes and peer pins.
 The `latest` channel may advance; the exact version above makes adoption explicit.
 
-Development and CI use Node 22.22.1 and npm 11.19.1. Node 22.12.0 or newer
-is required by the updated Alchemy browser tooling. Use npm 11.19.1 for both
-initial resolution and clean installs; npm 10 does not reliably resolve this
-prerelease peer graph.
+Development and CI use Node 22.22.1 and pnpm. The `packageManager` field selects
+pnpm 11.25.0, matching upstream Alchemy; release scripts do not require an exact
+pnpm patch version. Node 22.12.0 or newer is required by the Alchemy browser tooling.
 
 Alchemy 2.0.0-beta.76 replaces the vulnerable browser extraction and image
 libraries. The remaining upstream pins need these overrides in the **consumer
-application's root** `package.json`, as well as this repository's root:
+application's root** `pnpm-workspace.yaml`, as well as this repository's root:
 
-```json
-{
-  "overrides": {
-    "lodash": "4.18.1",
-    "hono": "4.13.7",
-    "@hono/node-server": "1.19.17",
-    "valibot": "1.4.2"
-  }
-}
+```yaml
+overrides:
+  lodash: "4.18.1"
+  hono: "4.13.7"
+  "@hono/node-server": "1.19.17"
+  valibot: "1.4.2"
+
+allowBuilds:
+  "@alicloud/openapi-core": false # Its hook only handles Node 10/12.
+  esbuild: true
+  msgpackr-extract: true
+  sharp: true
+  workerd: true
 ```
 
+Merge these build-script settings with any existing application settings.
+For npm consumers, the same overrides mapping belongs in the root `package.json` under
+`overrides`. Consumers can use either package manager.
+
 Overrides in a library are not inherited by consumers. Set them before
-installing, commit the application's lockfile, and run `npm audit` there too.
+installing, commit the application's lockfile, and run `pnpm audit` there too.
 The repository's locked graph reports zero advisories at validation time;
 that result does not cover arbitrary consumer dependency combinations.
 
 Alchemy and Effect are exact peer dependencies because both APIs are prerelease.
 The package ships compiled ESM and declarations; Git installs build them with
-`prepare`. See [npm package dependency documentation](https://docs.npmjs.com/cli/v11/configuring-npm/package-json/#git-urls-as-dependencies).
+`prepare` using pnpm.
 Node 22 is the supported development runtime. Consumers choose their own state
 backend and credentials. In-memory state above is illustrative only: use a
 persistent, appropriately protected backend for resources you intend to manage.

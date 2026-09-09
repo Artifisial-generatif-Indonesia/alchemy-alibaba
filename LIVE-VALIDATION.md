@@ -30,11 +30,11 @@ these inputs before provisioning; do not infer a profile from ambient credential
 
 ## Local prerequisite
 
-Run on Node 22.22.1 with npm 11.19.1:
+Run on Node 22.22.1 with pnpm:
 
 ```sh
-npx --yes npm@11.19.1 ci
-npx --yes npm@11.19.1 run release:prepare
+pnpm install --frozen-lockfile
+pnpm run release:prepare
 ```
 
 The example RDS stack uses in-memory state for illustration. Do not run it
