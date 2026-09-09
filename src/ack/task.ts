@@ -46,6 +46,8 @@ export const waitForTask = (options: {
     operation: options.operation,
     read,
     ready: (task) => task?.state?.toLowerCase() === "success",
-    wait: options.wait,
+    // ACK allows 30 minutes for a node drain before subsequent removal steps.
+    // Its task wait must outlast that window rather than use the shared 20 minutes.
+    wait: { ...options.wait, attempts: options.wait?.attempts ?? 240 },
   }).pipe(Effect.asVoid);
 };

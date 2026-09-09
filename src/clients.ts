@@ -2,10 +2,12 @@ import ACRClientImport from "@alicloud/cr20181201";
 import CredentialImport, {
   CLIProfileCredentialsProvider,
 } from "@alicloud/credentials";
+import ECSClientImport from "@alicloud/ecs20140526";
 import ACKClientImport from "@alicloud/cs20151215";
 import { $OpenApiUtil } from "@alicloud/openapi-core";
 import TairClientImport from "@alicloud/r-kvstore20150101";
 import RDSClientImport from "@alicloud/rds20140815";
+import RAMClientImport from "@alicloud/ram20150501";
 import VPCClientImport from "@alicloud/vpc20160428";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
@@ -22,15 +24,16 @@ const hasCommonJsDefault = <Value>(
   typeof value === "object" && value !== null && "default" in value;
 
 /** Alibaba SDK packages expose a nested default under native Node ESM. */
-const interopDefault = <Value>(
-  value: Value | CommonJsDefault<Value>,
-): Value => (hasCommonJsDefault(value) ? value.default : value);
+const interopDefault = <Value>(value: Value | CommonJsDefault<Value>): Value =>
+  hasCommonJsDefault(value) ? value.default : value;
 
 type ACRClient = InstanceType<typeof ACRClientImport>;
+type ECSClient = InstanceType<typeof ECSClientImport>;
 type ACKClient = InstanceType<typeof ACKClientImport>;
 type Credential = InstanceType<typeof CredentialImport>;
 type RDSClient = InstanceType<typeof RDSClientImport>;
 type TairClient = InstanceType<typeof TairClientImport>;
+type RAMClient = InstanceType<typeof RAMClientImport>;
 type VPCClient = InstanceType<typeof VPCClientImport>;
 
 // Keep the SDK's documented defaults explicit so every provider request is
@@ -41,18 +44,22 @@ export const ALIBABA_DEFAULT_READ_TIMEOUT_MS = 10_000;
 export const ALIBABA_RDS_DEFAULT_READ_TIMEOUT_MS = 20_000;
 
 const ACRClient = interopDefault(ACRClientImport);
+const ECSClient = interopDefault(ECSClientImport);
 const ACKClient = interopDefault(ACKClientImport);
 const Credential = interopDefault(CredentialImport);
 const RDSClient = interopDefault(RDSClientImport);
 const TairClient = interopDefault(TairClientImport);
+const RAMClient = interopDefault(RAMClientImport);
 const VPCClient = interopDefault(VPCClientImport);
 
 export interface AlibabaEndpoints {
+  readonly ecs?: string;
   readonly ack?: string;
   readonly acr?: string;
   readonly tair?: string;
   readonly rds?: string;
   readonly vpc?: string;
+  readonly ram?: string;
 }
 
 export interface AlibabaClientOptions {
@@ -70,11 +77,13 @@ export interface AlibabaClientOptions {
 }
 
 export interface AlibabaClientSet {
+  readonly ecs: ECSClient;
   readonly ack: ACKClient;
   readonly acr: ACRClient;
   readonly tair: TairClient;
   readonly rds: RDSClient;
   readonly vpc: VPCClient;
+  readonly ram: RAMClient;
   readonly regionId: string;
 }
 
@@ -103,7 +112,10 @@ const clientConfig = (
     userAgent: options.userAgent ?? "alchemy-alibaba/0.1",
   });
 
-export const makeClients = (options: AlibabaClientOptions): AlibabaClientSet => ({
+export const makeClients = (
+  options: AlibabaClientOptions,
+): AlibabaClientSet => ({
+  ecs: new ECSClient(clientConfig(options, options.endpoints?.ecs)),
   ack: new ACKClient(clientConfig(options, options.endpoints?.ack)),
   acr: new ACRClient(clientConfig(options, options.endpoints?.acr)),
   tair: new TairClient(clientConfig(options, options.endpoints?.tair)),
@@ -114,6 +126,7 @@ export const makeClients = (options: AlibabaClientOptions): AlibabaClientSet => 
       ALIBABA_RDS_DEFAULT_READ_TIMEOUT_MS,
     ),
   ),
+  ram: new RAMClient(clientConfig(options, options.endpoints?.ram)),
   vpc: new VPCClient(clientConfig(options, options.endpoints?.vpc)),
   regionId: options.regionId,
 });
@@ -125,18 +138,18 @@ export const clients = (options: AlibabaClientOptions) =>
 export const credentialFromCliProfile = (profile: string): Credential =>
   new Credential(
     null,
-    CLIProfileCredentialsProvider.builder()
-      .withProfileName(profile)
-      .build(),
+    CLIProfileCredentialsProvider.builder().withProfileName(profile).build(),
   );
 
 const environmentOptions = Config.all({
   regionId: Config.string("ALIBABA_CLOUD_REGION"),
   profile: Config.option(Config.string("ALIBABA_CLOUD_PROFILE")),
+  ecsEndpoint: Config.option(Config.string("ALIBABA_CLOUD_ECS_ENDPOINT")),
   ackEndpoint: Config.option(Config.string("ALIBABA_CLOUD_ACK_ENDPOINT")),
   acrEndpoint: Config.option(Config.string("ALIBABA_CLOUD_ACR_ENDPOINT")),
   tairEndpoint: Config.option(Config.string("ALIBABA_CLOUD_TAIR_ENDPOINT")),
   rdsEndpoint: Config.option(Config.string("ALIBABA_CLOUD_RDS_ENDPOINT")),
+  ramEndpoint: Config.option(Config.string("ALIBABA_CLOUD_RAM_ENDPOINT")),
   vpcEndpoint: Config.option(Config.string("ALIBABA_CLOUD_VPC_ENDPOINT")),
 });
 
@@ -155,14 +168,34 @@ export const clientsFromEnvironment = () =>
             ? credentialFromCliProfile(options.profile.value)
             : undefined,
         endpoints: {
-          ack: options.ackEndpoint._tag === "Some" ? options.ackEndpoint.value : undefined,
-          acr: options.acrEndpoint._tag === "Some" ? options.acrEndpoint.value : undefined,
+          ecs:
+            options.ecsEndpoint._tag === "Some"
+              ? options.ecsEndpoint.value
+              : undefined,
+          ack:
+            options.ackEndpoint._tag === "Some"
+              ? options.ackEndpoint.value
+              : undefined,
+          acr:
+            options.acrEndpoint._tag === "Some"
+              ? options.acrEndpoint.value
+              : undefined,
           tair:
             options.tairEndpoint._tag === "Some"
               ? options.tairEndpoint.value
               : undefined,
-          rds: options.rdsEndpoint._tag === "Some" ? options.rdsEndpoint.value : undefined,
-          vpc: options.vpcEndpoint._tag === "Some" ? options.vpcEndpoint.value : undefined,
+          rds:
+            options.rdsEndpoint._tag === "Some"
+              ? options.rdsEndpoint.value
+              : undefined,
+          ram:
+            options.ramEndpoint._tag === "Some"
+              ? options.ramEndpoint.value
+              : undefined,
+          vpc:
+            options.vpcEndpoint._tag === "Some"
+              ? options.vpcEndpoint.value
+              : undefined,
         },
       }),
     ),

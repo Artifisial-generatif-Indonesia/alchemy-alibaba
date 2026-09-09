@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   check:
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -19,4 +19,4 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run check
       - run: npm run check:security
-      - run: npm pack --dry-run
+      - run: npm run check:package

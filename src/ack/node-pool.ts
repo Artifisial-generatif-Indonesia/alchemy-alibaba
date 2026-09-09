@@ -1,3 +1,11 @@
+import { validateDesiredInput } from "../internal/desired-input.ts";
+import { modelFields } from "../internal/model-input.ts";
+import { sdkInput, type SecretInput } from "../internal/secret-input.ts";
+import {
+  uniqueMatch,
+  replacement,
+  requireRecoveryOwnership,
+} from "../internal/identity.ts";
 import * as ACK from "@alicloud/cs20151215";
 import { Unowned } from "alchemy/AdoptPolicy";
 import { isResolved } from "alchemy/Diff";
@@ -26,11 +34,11 @@ import type { Providers } from "../providers.ts";
 import { waitForTask } from "./task.ts";
 import { modelMatches } from "../internal/observation.ts";
 
-type NodePoolCreateRequest = ModelInput<ACK.CreateClusterNodePoolRequest>;
+type NodePoolCreateRequest = SecretInput<ACK.CreateClusterNodePoolRequest>;
 type NodePoolInfo = NonNullable<NodePoolCreateRequest["nodepoolInfo"]>;
 type NodePoolScalingGroup = NonNullable<NodePoolCreateRequest["scalingGroup"]>;
 
-export type NodePoolCreate = Omit<
+type NodePoolCreate = Omit<
   NodePoolCreateRequest,
   "nodepoolInfo" | "scalingGroup"
 > & {
@@ -48,16 +56,47 @@ export type NodePoolCreate = Omit<
   };
 };
 
-export interface NodePoolProps {
-  readonly clusterId: string;
-  readonly name?: string;
-  /** Alibaba CreateClusterNodePool request with documented required fields encoded. */
-  readonly create: NodePoolCreate;
-  /** Complete mutable request; applied when desired input or observed tags drift. */
-  readonly modify?: ModelInput<ACK.ModifyClusterNodePoolRequest>;
-  readonly delete?: ModelInput<ACK.DeleteClusterNodepoolRequest>;
-  readonly tags?: Readonly<Record<string, string>>;
-}
+/** One desired node-pool configuration; mutable fields update through ACK. */
+export type NodePoolProps = NodePoolCreate &
+  Omit<SecretInput<ACK.ModifyClusterNodePoolRequest>, keyof NodePoolCreate> & {
+    readonly clusterId: string;
+    readonly name?: string;
+    /** force permits deleting a populated pool; ACK can still drain nodes and honor disruption budgets. */
+    readonly delete?: ModelInput<ACK.DeleteClusterNodepoolRequest>;
+    readonly tags?: Readonly<Record<string, string>>;
+  };
+const mutableScaling = [
+  "desiredSize",
+  "imageId",
+  "imageType",
+  "instanceTypes",
+] as const;
+const immutableCreate = (create: NodePoolCreate) => ({
+  ...create,
+  scalingGroup: Object.fromEntries(
+    Object.entries(create.scalingGroup).filter(
+      ([key]) =>
+        !mutableScaling.includes(key as (typeof mutableScaling)[number]),
+    ),
+  ),
+});
+const requests = (props: NodePoolProps) => ({
+  ...props,
+  create: modelFields<NodePoolCreate>(props, ACK.CreateClusterNodePoolRequest),
+  modify: {
+    ...modelFields<SecretInput<ACK.ModifyClusterNodePoolRequest>>(
+      props,
+      ACK.ModifyClusterNodePoolRequest,
+      Object.keys(ACK.CreateClusterNodePoolRequest.types()),
+    ),
+    scalingGroup: {
+      desiredSize: props.scalingGroup?.desiredSize,
+      imageId: props.scalingGroup?.imageId,
+      imageType: props.scalingGroup?.imageType,
+      instanceTypes: props.scalingGroup?.instanceTypes,
+    },
+  },
+});
 
 export interface NodePoolAttributes {
   readonly clusterId: string;
@@ -196,12 +235,15 @@ export const NodePoolProvider = (options: NodePoolProviderOptions = {}) =>
             new ACK.DescribeClusterNodePoolsRequest({ nodepoolName: name }),
           ),
         ).pipe(
-          Effect.map(
-            (response) =>
-              response.body?.nodepools?.find(
+          Effect.flatMap((response) =>
+            uniqueMatch(
+              (response.body?.nodepools ?? []).filter(
                 (pool) => pool.nodepoolInfo?.name === name,
-              )?.nodepoolInfo?.nodepoolId,
+              ),
+              NodePool.Type,
+            ),
           ),
+          Effect.map((pool) => pool?.nodepoolInfo?.nodepoolId),
           Effect.flatMap((nodepoolId) =>
             nodepoolId === undefined
               ? Effect.succeed(undefined)
@@ -216,13 +258,7 @@ export const NodePoolProvider = (options: NodePoolProviderOptions = {}) =>
       ) =>
         nodepoolId === undefined
           ? findByName(clusterId, name)
-          : getById(clusterId, nodepoolId).pipe(
-              Effect.flatMap((pool) =>
-                pool === undefined
-                  ? findByName(clusterId, name)
-                  : Effect.succeed(pool),
-              ),
-            );
+          : getById(clusterId, nodepoolId);
 
       return {
         version: 1,
@@ -308,22 +344,48 @@ export const NodePoolProvider = (options: NodePoolProviderOptions = {}) =>
             Effect.map((groups) => groups.flat()),
           ),
 
-        diff: Effect.fn(function* ({ olds, news }) {
-          if (!isResolved(news)) return undefined;
-          if (olds.clusterId === undefined || olds.create === undefined) {
+        diff: Effect.fn(function* ({ olds: previous, news: input, output }) {
+          if (!isResolved(input)) return undefined;
+          const olds = requests(previous);
+          yield* validateDesiredInput(input, NodePool.Type);
+          const news = requests(input);
+          if (
+            olds.clusterId === undefined ||
+            olds.create.scalingGroup === undefined
+          ) {
             return undefined;
           }
           if (
             olds.clusterId !== news.clusterId ||
             olds.name !== news.name ||
-            !isDeepStrictEqual(olds.create, news.create)
+            !isDeepStrictEqual(
+              immutableCreate(olds.create),
+              immutableCreate(news.create),
+            )
           ) {
-            return { action: "replace" } as const;
+            return yield* replacement(
+              NodePool.Type,
+              olds.clusterId === news.clusterId ? olds.name : undefined,
+              news.name,
+            );
+          }
+          if (output !== undefined) {
+            const observed = yield* getById(
+              output.clusterId,
+              output.nodepoolId,
+            );
+            const modify = yield* sdkInput<ACK.ModifyClusterNodePoolRequest>(
+              news.modify,
+              NodePool.Type,
+            );
+            if (observed !== undefined && !modifyMatches(observed, modify))
+              return { action: "update" };
           }
           return undefined;
         }),
 
-        read: Effect.fn(function* ({ id, olds, output }) {
+        read: Effect.fn(function* ({ id, olds: input, output }) {
+          const olds = requests(input);
           const clusterId = olds.clusterId ?? output?.clusterId;
           if (clusterId === undefined) return undefined;
           const name = yield* physicalName(id, olds.name ?? output?.name, 63);
@@ -335,12 +397,36 @@ export const NodePoolProvider = (options: NodePoolProviderOptions = {}) =>
             : Unowned(attributes);
         }),
 
-        reconcile: Effect.fn(function* ({ id, news, olds, output }) {
+        reconcile: Effect.fn(function* ({
+          id,
+          news: input,
+          olds: previous,
+          output,
+          session,
+        }) {
+          yield* validateDesiredInput(input, NodePool.Type);
+          const news = requests(input);
+          const olds = previous === undefined ? undefined : requests(previous);
+          const create = yield* sdkInput<ACK.CreateClusterNodePoolRequest>(
+            news.create,
+            NodePool.Type,
+          );
+          const modify = yield* sdkInput<ACK.ModifyClusterNodePoolRequest>(
+            news.modify,
+            NodePool.Type,
+          );
           const name = yield* physicalName(id, news.name ?? output?.name, 63);
           const tags = yield* desiredTags(id, news.tags);
           let pool = yield* observe(news.clusterId, output?.nodepoolId, name);
+          if (pool !== undefined && output === undefined)
+            yield* requireRecoveryOwnership(
+              id,
+              NodePool.Type,
+              observedTags(pool),
+            );
 
           if (pool === undefined) {
+            yield* session.note(`Creating ACK node pool ${name}`);
             const response = yield* sdkCall(
               "ACK",
               "CreateClusterNodePool",
@@ -348,10 +434,10 @@ export const NodePoolProvider = (options: NodePoolProviderOptions = {}) =>
                 clients.ack.createClusterNodePool(
                   news.clusterId,
                   new ACK.CreateClusterNodePoolRequest({
-                    ...news.create,
-                    nodepoolInfo: { ...news.create.nodepoolInfo, name },
+                    ...create,
+                    nodepoolInfo: { ...create.nodepoolInfo, name },
                     scalingGroup: {
-                      ...news.create.scalingGroup,
+                      ...create.scalingGroup,
                       tags: tagList(tags),
                     },
                   }),
@@ -381,8 +467,14 @@ export const NodePoolProvider = (options: NodePoolProviderOptions = {}) =>
           if (
             !tagsEqual(observedTags(pool), tags) ||
             (news.modify !== undefined &&
-              (!isDeepStrictEqual(news.modify, olds?.modify) ||
-                !modifyMatches(pool, news.modify)))
+              ((olds !== undefined
+                ? !isDeepStrictEqual(news.modify, olds.modify)
+                : Object.entries(news.modify).some(
+                    ([key, value]) =>
+                      value !== undefined &&
+                      !(key in ACK.CreateClusterNodePoolRequest.types()),
+                  )) ||
+                !modifyMatches(pool, modify)))
           ) {
             const response = yield* sdkCall(
               "ACK",
@@ -392,9 +484,9 @@ export const NodePoolProvider = (options: NodePoolProviderOptions = {}) =>
                   news.clusterId,
                   nodepoolId,
                   new ACK.ModifyClusterNodePoolRequest({
-                    ...news.modify,
+                    ...modify,
                     scalingGroup: {
-                      ...news.modify?.scalingGroup,
+                      ...modify?.scalingGroup,
                       tags: tagList(tags),
                     },
                   }),
@@ -414,14 +506,15 @@ export const NodePoolProvider = (options: NodePoolProviderOptions = {}) =>
             read: getById(news.clusterId, nodepoolId),
             ready: (value) =>
               ready(value) &&
-              modifyMatches(value, news.modify) &&
+              modifyMatches(value, modify) &&
               tagsEqual(observedTags(value), tags),
             wait: options.wait,
           });
           return yield* toAttributes(news.clusterId, fresh);
         }),
 
-        delete: Effect.fn(function* ({ output, olds }) {
+        delete: Effect.fn(function* ({ output, olds: input }) {
+          const olds = requests(input);
           const pool = yield* getById(output.clusterId, output.nodepoolId);
           if (pool === undefined) return;
           if (!deleting(pool)) {

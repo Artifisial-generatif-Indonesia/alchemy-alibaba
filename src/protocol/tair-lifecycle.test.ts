@@ -13,25 +13,21 @@ import {
   protocolClientLayer,
   withProtocolHarness,
 } from "./harness.ts";
-
 const tairNews = {
   name: "protocol-tair",
   password: Redacted.make("ProtocolPass1!"),
-  create: {
-    instanceType: "Redis",
-    engineVersion: "7.0",
-    instanceClass: "redis.shard.small.2.ce",
-    chargeType: "PostPaid",
-    networkType: "VPC",
-    vpcId: "vpc-protocol",
-    vSwitchId: "vsw-protocol",
-    zoneId: "ap-southeast-5b",
-  },
+  instanceType: "Redis",
+  engineVersion: "7.0",
+  instanceClass: "redis.shard.small.2.ce",
+  chargeType: "PostPaid",
+  networkType: "VPC",
+  vpcId: "vpc-protocol",
+  vSwitchId: "vsw-protocol",
+  zoneId: "ap-southeast-5b",
   ssl: "Enable" as const,
   evictionPolicy: "noeviction" as const,
   vpcAuthMode: "Open" as const,
 };
-
 const runWith = <A, Error>(
   host: string,
   program: Effect.Effect<A, Error, Provider.Provider<Instance>>,
@@ -47,8 +43,7 @@ const runWith = <A, Error>(
       Effect.provide(alchemyTestRuntime),
     ),
   );
-
-describe("Tair protocol lifecycle", { timeout: 30_000 }, () => {
+describe("Tair protocol lifecycle", { timeout: 30000 }, () => {
   it("recovers a lock-rejected create that Alibaba still accepted", async () => {
     await withProtocolHarness(
       async ({ server, world, clients }) => {
@@ -81,7 +76,6 @@ describe("Tair protocol lifecycle", { timeout: 30_000 }, () => {
       { tairDescribesUntilNormal: 2, omitCreatingIdentityReads: 1 },
     );
   });
-
   it("fills identity when creating attributes omit it", async () => {
     await withProtocolHarness(
       async ({ server, world }) => {
@@ -92,8 +86,8 @@ describe("Tair protocol lifecycle", { timeout: 30_000 }, () => {
             return yield* provider.reconcile({
               ...resourceBase("tair-partial"),
               news: {
+                ...tairNews,
                 name: "protocol-tair-partial",
-                create: tairNews.create,
               },
               olds: undefined,
               output: undefined,
@@ -110,7 +104,6 @@ describe("Tair protocol lifecycle", { timeout: 30_000 }, () => {
       { omitCreatingIdentityReads: 2, tairDescribesUntilNormal: 3 },
     );
   });
-
   it("retries IncorrectDBInstanceState and serializes SSL then VPC auth then config", async () => {
     await withProtocolHarness(
       async ({ server, world }) => {
@@ -141,7 +134,6 @@ describe("Tair protocol lifecycle", { timeout: 30_000 }, () => {
       { tairSslRejects: 2, tairDescribesUntilNormal: 1 },
     );
   });
-
   it("preserves IncorrectDBInstanceState when SSL never becomes accepted", async () => {
     await withProtocolHarness(
       async ({ server }) => {
@@ -175,7 +167,6 @@ describe("Tair protocol lifecycle", { timeout: 30_000 }, () => {
       { tairSslRejects: 20 },
     );
   });
-
   it("hides Released instances from DescribeInstances and requires DestroyInstance", async () => {
     await withProtocolHarness(async ({ server, world, clients }) => {
       const created = await runWith(
@@ -184,13 +175,13 @@ describe("Tair protocol lifecycle", { timeout: 30_000 }, () => {
           const provider = yield* Instance.Provider;
           const output = yield* provider.reconcile({
             ...resourceBase("tair-recycle"),
-            news: { name: "protocol-tair-recycle", create: tairNews.create },
+            news: { ...tairNews, name: "protocol-tair-recycle" },
             olds: undefined,
             output: undefined,
           });
           yield* provider.delete({
             ...resourceBase("tair-recycle"),
-            olds: { name: "protocol-tair-recycle", create: tairNews.create },
+            olds: { ...tairNews, name: "protocol-tair-recycle" },
             output,
           });
           return output;
@@ -208,7 +199,6 @@ describe("Tair protocol lifecycle", { timeout: 30_000 }, () => {
       expect(world.activeTair()).toHaveLength(0);
     });
   });
-
   it("does not treat a live overview row as absent during inconsistent detail reads", async () => {
     await withProtocolHarness(async ({ server, world }) => {
       const created = await runWith(
@@ -218,8 +208,8 @@ describe("Tair protocol lifecycle", { timeout: 30_000 }, () => {
           return yield* provider.reconcile({
             ...resourceBase("tair-inconsistent-delete"),
             news: {
+              ...tairNews,
               name: "protocol-tair-inconsistent-delete",
-              create: tairNews.create,
             },
             olds: undefined,
             output: undefined,
@@ -234,8 +224,8 @@ describe("Tair protocol lifecycle", { timeout: 30_000 }, () => {
           yield* provider.delete({
             ...resourceBase("tair-inconsistent-delete"),
             olds: {
+              ...tairNews,
               name: "protocol-tair-inconsistent-delete",
-              create: tairNews.create,
             },
             output: created,
           });
@@ -246,7 +236,6 @@ describe("Tair protocol lifecycle", { timeout: 30_000 }, () => {
       expect(world.activeTair()).toHaveLength(0);
     });
   });
-
   it("fails deletion visibly when live overview and detail reads stay inconsistent", async () => {
     await withProtocolHarness(async ({ server, world }) => {
       const created = await runWith(
@@ -256,8 +245,8 @@ describe("Tair protocol lifecycle", { timeout: 30_000 }, () => {
           return yield* provider.reconcile({
             ...resourceBase("tair-inconsistent-timeout"),
             news: {
+              ...tairNews,
               name: "protocol-tair-inconsistent-timeout",
-              create: tairNews.create,
             },
             olds: undefined,
             output: undefined,
@@ -273,8 +262,8 @@ describe("Tair protocol lifecycle", { timeout: 30_000 }, () => {
             yield* provider.delete({
               ...resourceBase("tair-inconsistent-timeout"),
               olds: {
+                ...tairNews,
                 name: "protocol-tair-inconsistent-timeout",
-                create: tairNews.create,
               },
               output: created,
             });
@@ -290,7 +279,6 @@ describe("Tair protocol lifecycle", { timeout: 30_000 }, () => {
       expect(world.activeTair()).toHaveLength(1);
     });
   });
-
   it("waits through delayed Kvstore detachment before deleting a vSwitch", async () => {
     await withProtocolHarness(
       async ({ server, world }) => {
@@ -318,12 +306,10 @@ describe("Tair protocol lifecycle", { timeout: 30_000 }, () => {
           const tair = yield* tairProvider.reconcile({
             ...resourceBase("tair"),
             news: {
+              ...tairNews,
               name: "protocol-tair-dep",
-              create: {
-                ...tairNews.create,
-                vpcId: network.vpcId,
-                vSwitchId: vswitch.vSwitchId,
-              },
+              vpcId: network.vpcId,
+              vSwitchId: vswitch.vSwitchId,
             },
             olds: undefined,
             output: undefined,
@@ -331,12 +317,10 @@ describe("Tair protocol lifecycle", { timeout: 30_000 }, () => {
           yield* tairProvider.delete({
             ...resourceBase("tair"),
             olds: {
+              ...tairNews,
               name: "protocol-tair-dep",
-              create: {
-                ...tairNews.create,
-                vpcId: network.vpcId,
-                vSwitchId: vswitch.vSwitchId,
-              },
+              vpcId: network.vpcId,
+              vSwitchId: vswitch.vSwitchId,
             },
             output: tair,
           });

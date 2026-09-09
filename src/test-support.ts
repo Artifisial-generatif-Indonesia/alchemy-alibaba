@@ -1,8 +1,10 @@
 import ACRClient from "@alicloud/cr20181201";
+import ECSClient from "@alicloud/ecs20140526";
 import ACKClient from "@alicloud/cs20151215";
 import { $OpenApiUtil } from "@alicloud/openapi-core";
 import TairClient from "@alicloud/r-kvstore20150101";
 import RDSClient from "@alicloud/rds20140815";
+import RAMClient from "@alicloud/ram20150501";
 import VPCClient from "@alicloud/vpc20160428";
 import type { ScopedPlanStatusSession } from "alchemy/Cli/Cli";
 import { Stack } from "alchemy/Stack";
@@ -36,16 +38,20 @@ export const alchemyTestRuntime = Layer.mergeAll(
 );
 
 export const testClientSet = (overrides: {
+  readonly ecs?: ECSClient;
   readonly ack?: ACKClient;
   readonly acr?: ACRClient;
   readonly tair?: TairClient;
   readonly rds?: RDSClient;
   readonly vpc?: VPCClient;
+  readonly ram?: RAMClient;
 }): AlibabaClientSet => ({
+  ecs: overrides.ecs ?? new ECSClient(testConfig()),
   ack: overrides.ack ?? new ACKClient(testConfig()),
   acr: overrides.acr ?? new ACRClient(testConfig()),
   tair: overrides.tair ?? new TairClient(testConfig()),
   rds: overrides.rds ?? new RDSClient(testConfig()),
+  ram: overrides.ram ?? new RAMClient(testConfig()),
   vpc: overrides.vpc ?? new VPCClient(testConfig()),
   regionId: "ap-southeast-5",
 });

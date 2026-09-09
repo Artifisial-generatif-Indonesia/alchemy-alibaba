@@ -1,9 +1,19 @@
+import { validateDesiredInput } from "../internal/desired-input.ts";
+import { clusterConnection } from "./kubeconfig.ts";
+import type { Connection } from "alchemy/Kubernetes/Connection";
+import { modelFields } from "../internal/model-input.ts";
+import { sdkInput, type SecretInput } from "../internal/secret-input.ts";
+import {
+  uniqueMatch,
+  replacement,
+  requireRecoveryOwnership,
+} from "../internal/identity.ts";
 import * as ACK from "@alicloud/cs20151215";
 import { Unowned } from "alchemy/AdoptPolicy";
 import { isResolved } from "alchemy/Diff";
 import * as Provider from "alchemy/Provider";
 import { Resource } from "alchemy/Resource";
-import { hasAlchemyTags } from "alchemy/Tags";
+import { hasAlchemyTags, diffTags } from "alchemy/Tags";
 import * as Effect from "effect/Effect";
 import { isDeepStrictEqual } from "node:util";
 import { AlibabaClients } from "../clients.ts";
@@ -32,8 +42,8 @@ import type { Providers } from "../providers.ts";
 import { waitForTask } from "./task.ts";
 import { modelMatches } from "../internal/observation.ts";
 
-type ManagedClusterCreateRequest = Without<
-  ACK.CreateClusterRequest,
+type ManagedClusterCreateRequest = Omit<
+  SecretInput<ACK.CreateClusterRequest>,
   | "clusterSpec"
   | "clusterType"
   | "addons"
@@ -62,7 +72,7 @@ type ManagedClusterNetwork =
       readonly containerCidr?: string;
     };
 
-export type ManagedClusterCreate = ManagedClusterCreateRequest &
+type ManagedClusterCreate = ManagedClusterCreateRequest &
   ManagedClusterNetwork & {
     readonly regionId?: string;
     /** The ACK CreateCluster contract for a managed cluster. */
@@ -76,21 +86,64 @@ export type ManagedClusterCreate = ManagedClusterCreateRequest &
     readonly vswitchIds: string[];
   };
 
-export interface ManagedClusterProps {
-  /** Deterministic Alchemy name when omitted. */
-  readonly name?: string;
-  /** Every field accepted by Alibaba's current CreateCluster API. */
-  readonly create: ManagedClusterCreate;
-  /** Declarative mutable cluster settings accepted by ModifyCluster. */
-  readonly modify?: ModelInput<ACK.ModifyClusterRequest>;
-  /** Upgrades only while the observed version differs from nextVersion. */
-  readonly upgrade?: ModelInput<ACK.UpgradeClusterRequest>;
-  /** Controls retention of cluster-associated resources during destroy. */
-  readonly delete?: ModelInput<ACK.DeleteClusterRequest>;
-  readonly tags?: Readonly<Record<string, string>>;
-}
+/** Desired cluster configuration; SDK create/update requests are internal. */
+export type ManagedClusterProps = ManagedClusterCreate &
+  Omit<
+    SecretInput<ACK.ModifyClusterRequest>,
+    keyof ManagedClusterCreate | "clusterName" | "clientToken"
+  > & {
+    readonly connectionOptions?: import("./kubeconfig.ts").KubeconfigOptions;
+    /** Deterministic Alchemy name when omitted. */
+    readonly name?: string;
+    /** Upgrade execution policy; kubernetesVersion is the only desired version. */
+    readonly upgradePolicy?: Without<
+      ACK.UpgradeClusterRequest,
+      "nextVersion" | "version"
+    >;
+    /** Retention of cluster-associated resources during destroy. */
+    readonly delete?: ModelInput<ACK.DeleteClusterRequest>;
+    readonly tags?: Readonly<Record<string, string>>;
+  };
+const mutableFields = [
+  "clusterSpec",
+  "deletionProtection",
+  "enableRrsa",
+  "maintenanceWindow",
+  "resourceGroupId",
+  "timezone",
+  "kubernetesVersion",
+] as const;
+const immutableCreate = (create: ManagedClusterCreate) =>
+  Object.fromEntries(
+    Object.entries(create).filter(
+      ([key]) => !mutableFields.includes(key as (typeof mutableFields)[number]),
+    ),
+  );
+const requests = (props: ManagedClusterProps) => ({
+  ...props,
+  create: modelFields<ManagedClusterCreate>(props, ACK.CreateClusterRequest, [
+    "name",
+    "tags",
+  ]),
+  modify: modelFields<SecretInput<ACK.ModifyClusterRequest>>(
+    props,
+    ACK.ModifyClusterRequest,
+    [
+      "clusterName",
+      "clientToken",
+      ...Object.keys(ACK.CreateClusterRequest.types()).filter(
+        (key) => !mutableFields.includes(key as (typeof mutableFields)[number]),
+      ),
+    ],
+  ),
+  upgrade: { ...props.upgradePolicy, nextVersion: props.kubernetesVersion },
+});
 
 export interface ManagedClusterAttributes {
+  /** ACK owns this OIDC provider when RRSA is enabled. */
+  readonly oidcProviderArn?: string;
+  readonly oidcIssuer?: string;
+  readonly connection: Connection;
   readonly clusterId: string;
   readonly name: string;
   readonly state: string;
@@ -162,6 +215,7 @@ const toAttributes = (
     );
     return {
       clusterId,
+      connection: clusterConnection(clusterId, { regionId: cluster.regionId }),
       name,
       state: cluster.state ?? "Unknown",
       clusterType: cluster.clusterType,
@@ -178,6 +232,8 @@ const toAttributes = (
       serviceCidr: cluster.serviceCidr,
       containerCidr: cluster.containerCidr,
       securityGroupId: cluster.securityGroupId,
+      oidcProviderArn: cluster.rrsaConfig?.oidcArn,
+      oidcIssuer: cluster.rrsaConfig?.issuer?.split(",")[0],
       resourceGroupId: cluster.resourceGroupId,
       apiServerUrl: cluster.masterUrl,
       deletionProtection: cluster.deletionProtection ?? false,
@@ -191,7 +247,7 @@ const sameVersion = (
   cluster: ACK.DescribeClusterDetailResponseBody,
   desired: ModelInput<ACK.UpgradeClusterRequest> | undefined,
 ): boolean => {
-  const version = desired?.nextVersion ?? desired?.version;
+  const version = desired?.nextVersion;
   return version === undefined || cluster.currentVersion === version;
 };
 
@@ -218,6 +274,16 @@ const modifyMatches = (
     ACK.DescribeClusterDetailResponseBody,
   );
 
+// Live ACK ignored deletionProtection in a successful request that also sent
+// an unchanged clusterSpec. Keep edition and configuration mutations separate.
+const modifyCategories = <T extends { readonly clusterSpec?: string }>({
+  clusterSpec,
+  ...configuration
+}: T) => [
+  { clusterSpec },
+  configuration,
+];
+
 export interface ManagedClusterProviderOptions {
   readonly wait?: WaitOptions;
 }
@@ -229,7 +295,7 @@ export const ManagedClusterProvider = (
     ManagedCluster,
     Effect.gen(function* () {
       const clients = yield* AlibabaClients;
-      const createRequest = (create: ManagedClusterProps["create"]) => ({
+      const createRequest = (create: ManagedClusterCreate) => ({
         ...create,
         regionId: create.regionId ?? clients.regionId,
       });
@@ -286,10 +352,13 @@ export const ManagedClusterProvider = (
       const findByName = (name: string) =>
         listClusters({ name }).pipe(
           // `name` is a server-side fuzzy match, so re-filter exactly.
-          Effect.map(
-            (clusters) =>
-              clusters.find((cluster) => cluster.name === name)?.clusterId,
+          Effect.flatMap((clusters) =>
+            uniqueMatch(
+              clusters.filter((cluster) => cluster.name === name),
+              ManagedCluster.Type,
+            ),
           ),
+          Effect.map((cluster) => cluster?.clusterId),
           Effect.flatMap((clusterId) =>
             clusterId === undefined
               ? Effect.succeed(undefined)
@@ -298,15 +367,7 @@ export const ManagedClusterProvider = (
         );
 
       const observe = (clusterId: string | undefined, name: string) =>
-        clusterId === undefined
-          ? findByName(name)
-          : getById(clusterId).pipe(
-              Effect.flatMap((cluster) =>
-                cluster === undefined
-                  ? findByName(name)
-                  : Effect.succeed(cluster),
-              ),
-            );
+        clusterId === undefined ? findByName(name) : getById(clusterId);
 
       const syncTags = Effect.fn(function* (
         clusterId: string,
@@ -315,13 +376,12 @@ export const ManagedClusterProvider = (
         desired: Readonly<Record<string, string>>,
       ) {
         if (tagsEqual(observed, desired)) return;
-        const upsert = Object.fromEntries(
-          Object.entries(desired).filter(
-            ([key, value]) => observed[key] !== value,
-          ),
+        const { removed, upsert: entries } = diffTags(
+          { ...observed },
+          { ...desired },
         );
-        const removed = Object.keys(observed).filter(
-          (key) => !(key in desired),
+        const upsert = Object.fromEntries(
+          entries.map(({ Key, Value }) => [Key, Value]),
         );
         if (Object.keys(upsert).length > 0) {
           yield* retryingSdkCall("ACK", "TagResources", () =>
@@ -383,8 +443,11 @@ export const ManagedClusterProvider = (
           ),
         stables: ["clusterId", "created"] as const,
 
-        diff: Effect.fn(function* ({ olds, news }) {
-          if (!isResolved(news)) return undefined;
+        diff: Effect.fn(function* ({ olds: previous, news: input, output }) {
+          if (!isResolved(input)) return undefined;
+          const olds = requests(previous);
+          yield* validateDesiredInput(input, ManagedCluster.Type);
+          const news = requests(input);
           if (
             olds.create === undefined ||
             (news.create.vpcid !== undefined &&
@@ -399,16 +462,34 @@ export const ManagedClusterProvider = (
           if (
             olds.name !== news.name ||
             !isDeepStrictEqual(
-              createRequest(olds.create),
-              createRequest(news.create),
+              immutableCreate(createRequest(olds.create)),
+              immutableCreate(createRequest(news.create)),
             )
           ) {
-            return { action: "replace" } as const;
+            return yield* replacement(
+              ManagedCluster.Type,
+              olds.name,
+              news.name,
+            );
+          }
+          if (output !== undefined) {
+            const observed = yield* getById(output.clusterId);
+            const modify = yield* sdkInput<ACK.ModifyClusterRequest>(
+              news.modify,
+              ManagedCluster.Type,
+            );
+            if (
+              observed !== undefined &&
+              (!modifyMatches(observed, modify) ||
+                !sameVersion(observed, news.upgrade))
+            )
+              return { action: "update" };
           }
           return undefined;
         }),
 
-        read: Effect.fn(function* ({ id, olds, output }) {
+        read: Effect.fn(function* ({ id, olds: input, output }) {
+          const olds = requests(input);
           yield* requireRegion(
             ManagedCluster.Type,
             clients.regionId,
@@ -422,13 +503,36 @@ export const ManagedClusterProvider = (
           const name = yield* physicalName(id, olds.name ?? output?.name, 63);
           const cluster = yield* observe(output?.clusterId, name);
           if (cluster === undefined) return undefined;
-          const attributes = yield* toAttributes(cluster);
+          const attributes = {
+            ...(yield* toAttributes(cluster)),
+            connection: clusterConnection(cluster.clusterId!, {
+              regionId: clients.regionId,
+              ...olds.connectionOptions,
+            }),
+          };
           return (yield* hasAlchemyTags(id, tagRecord(cluster.tags)))
             ? attributes
             : Unowned(attributes);
         }),
 
-        reconcile: Effect.fn(function* ({ id, news, olds, output }) {
+        reconcile: Effect.fn(function* ({
+          id,
+          news: input,
+          olds: previous,
+          output,
+          session,
+        }) {
+          yield* validateDesiredInput(input, ManagedCluster.Type);
+          const news = requests(input);
+          const olds = previous === undefined ? undefined : requests(previous);
+          const create = yield* sdkInput<ACK.CreateClusterRequest>(
+            news.create,
+            ManagedCluster.Type,
+          );
+          const modify = yield* sdkInput<ACK.ModifyClusterRequest>(
+            news.modify,
+            ManagedCluster.Type,
+          );
           yield* requireRegion(
             ManagedCluster.Type,
             clients.regionId,
@@ -460,12 +564,20 @@ export const ManagedClusterProvider = (
           const name = yield* physicalName(id, news.name ?? output?.name, 63);
           const tags = yield* desiredTags(id, news.tags);
           let cluster = yield* observe(output?.clusterId, name);
+          if (cluster !== undefined && output === undefined)
+            yield* requireRecoveryOwnership(
+              id,
+              ManagedCluster.Type,
+              tagRecord(cluster.tags),
+            );
 
           if (cluster === undefined) {
+            yield* session.note(`Creating ACK cluster ${name}`);
             const response = yield* sdkCall("ACK", "CreateCluster", () =>
               clients.ack.createCluster(
                 new ACK.CreateClusterRequest({
-                  ...createRequest(news.create),
+                  ...create,
+                  regionId: create.regionId ?? clients.regionId,
                   name,
                   tags: tagList(tags),
                 }),
@@ -494,15 +606,27 @@ export const ManagedClusterProvider = (
             "ACK returned a cluster without clusterId",
           );
 
-          if (
-            news.modify !== undefined &&
-            (!isDeepStrictEqual(news.modify, olds?.modify) ||
-              !modifyMatches(cluster, news.modify))
-          ) {
+          const categories = modifyCategories(modify);
+          const desiredCategories = modifyCategories(news.modify);
+          const oldCategories =
+            olds === undefined ? undefined : modifyCategories(olds.modify);
+          for (const [index, request] of categories.entries()) {
+            const changed =
+              oldCategories !== undefined
+                ? !isDeepStrictEqual(
+                    desiredCategories[index],
+                    oldCategories[index],
+                  )
+                : Object.entries(request).some(
+                    ([key, value]) =>
+                      value !== undefined &&
+                      !(key in ACK.CreateClusterRequest.types()),
+                  );
+            if (!changed && modifyMatches(cluster, request)) continue;
             const response = yield* sdkCall("ACK", "ModifyCluster", () =>
               clients.ack.modifyCluster(
                 clusterId,
-                new ACK.ModifyClusterRequest(news.modify),
+                new ACK.ModifyClusterRequest(request),
               ),
             );
             yield* waitForTask({
@@ -511,9 +635,17 @@ export const ManagedClusterProvider = (
               taskId: response.body?.taskId,
               wait: options.wait,
             });
+            cluster = yield* waitForPresent({
+              service: "ACK",
+              operation: "ModifyCluster",
+              read: getById(clusterId),
+              ready: (value) => ready(value) && modifyMatches(value, request),
+              wait: options.wait,
+            });
           }
 
           if (!sameVersion(cluster, news.upgrade)) {
+            yield* session.note(`Upgrading ACK cluster ${clusterId}`);
             const response = yield* sdkCall("ACK", "UpgradeCluster", () =>
               clients.ack.upgradeCluster(
                 clusterId,
@@ -542,14 +674,21 @@ export const ManagedClusterProvider = (
             ready: (value) =>
               ready(value) &&
               sameVersion(value, news.upgrade) &&
-              modifyMatches(value, news.modify) &&
+              modifyMatches(value, modify) &&
               tagsEqual(tagRecord(value.tags), tags),
             wait: options.wait,
           });
-          return yield* toAttributes(fresh);
+          return {
+            ...(yield* toAttributes(fresh)),
+            connection: clusterConnection(clusterId, {
+              regionId: clients.regionId,
+              ...news.connectionOptions,
+            }),
+          };
         }),
 
-        delete: Effect.fn(function* ({ output, olds }) {
+        delete: Effect.fn(function* ({ output, olds: input }) {
+          const olds = requests(input);
           yield* requireRegion(
             ManagedCluster.Type,
             clients.regionId,

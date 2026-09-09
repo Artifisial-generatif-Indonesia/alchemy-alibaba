@@ -81,8 +81,12 @@ describe("Alibaba protocol wire capture", { timeout: 15_000 }, () => {
           SSLEnabled: "Enable",
         }),
       );
-      const create = world.captured.find((item) => item.action === "CreateInstance");
-      const ssl = world.captured.find((item) => item.action === "ModifyInstanceSSL");
+      const create = world.captured.find(
+        (item) => item.action === "CreateInstance",
+      );
+      const ssl = world.captured.find(
+        (item) => item.action === "ModifyInstanceSSL",
+      );
       expect(create).toMatchObject({
         regionId: "ap-southeast-5",
         vpcId: "vpc-test",
@@ -134,6 +138,51 @@ describe("Alibaba protocol wire capture", { timeout: 15_000 }, () => {
     });
   });
 
+  it("decodes paginated regional RDS inventory without treating missing tokens as identical", async () => {
+    await withProtocolHarness(async ({ clients, world }) => {
+      for (const regionId of [
+        "ap-southeast-5",
+        "ap-southeast-5",
+        "cn-hangzhou",
+      ]) {
+        await clients.rds.createDBInstance(
+          new RDS.CreateDBInstanceRequest({
+            regionId,
+            DBInstanceDescription: "same-description",
+            engine: "PostgreSQL",
+            engineVersion: "16.0",
+            DBInstanceClass: "test-class",
+            DBInstanceStorage: 20,
+            DBInstanceNetType: "Intranet",
+            payType: "Postpaid",
+            securityIPList: "127.0.0.1",
+          }),
+        );
+      }
+      expect(world.rds.size).toBe(3);
+      const second = await clients.rds.describeDBInstances(
+        new RDS.DescribeDBInstancesRequest({
+          regionId: "ap-southeast-5",
+          searchKey: "same-description",
+          pageNumber: 2,
+          pageSize: 1,
+        }),
+      );
+      expect(second.body?.totalRecordCount).toBe(2);
+      expect(
+        second.body?.items?.DBInstance?.map((x) => x.DBInstanceId),
+      ).toEqual([[...world.rds.keys()][1]]);
+      const end = await clients.rds.describeDBInstances(
+        new RDS.DescribeDBInstancesRequest({
+          regionId: "ap-southeast-5",
+          pageNumber: 3,
+          pageSize: 1,
+        }),
+      );
+      expect(end.body?.items?.DBInstance).toEqual([]);
+    });
+  });
+
   it("decodes Alibaba error envelopes including request IDs", async () => {
     await withProtocolHarness(async ({ clients, world }) => {
       world.script({ action: "DescribeVpcs", code: "Throttling", times: 1 });
@@ -145,7 +194,9 @@ describe("Alibaba protocol wire capture", { timeout: 15_000 }, () => {
         code: "Throttling",
         statusCode: 400,
       });
-      const failed = world.captured.find((item) => item.action === "DescribeVpcs");
+      const failed = world.captured.find(
+        (item) => item.action === "DescribeVpcs",
+      );
       expect(failed?.regionId).toBe("ap-southeast-5");
     });
   });

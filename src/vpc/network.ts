@@ -1,9 +1,11 @@
+import { validateDesiredInput } from "../internal/desired-input.ts";
+import { modelFields } from "../internal/model-input.ts";
 import * as VPC from "@alicloud/vpc20160428";
 import { Unowned } from "alchemy/AdoptPolicy";
 import { isResolved } from "alchemy/Diff";
 import * as Provider from "alchemy/Provider";
 import { Resource } from "alchemy/Resource";
-import { hasAlchemyTags } from "alchemy/Tags";
+import { hasAlchemyTags, diffTags } from "alchemy/Tags";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import { isDeepStrictEqual } from "node:util";
@@ -32,19 +34,41 @@ import {
 import type { Without } from "../internal/model-input.ts";
 import type { Providers } from "../providers.ts";
 
-export interface NetworkProps {
-  readonly name?: string;
-  readonly cidrBlock: string;
-  readonly create?: Without<
-    VPC.CreateVpcRequest,
-    "regionId" | "vpcName" | "cidrBlock" | "tag"
-  >;
-  readonly modify?: Without<
-    VPC.ModifyVpcAttributeRequest,
-    "regionId" | "vpcId" | "vpcName" | "cidrBlock"
-  >;
-  readonly tags?: Readonly<Record<string, string>>;
-}
+type CreateSettings = Without<
+  VPC.CreateVpcRequest,
+  "regionId" | "vpcName" | "cidrBlock" | "tag"
+>;
+type MutableSettings = Without<
+  VPC.ModifyVpcAttributeRequest,
+  "regionId" | "vpcId" | "vpcName" | "cidrBlock"
+>;
+export type NetworkProps = CreateSettings &
+  MutableSettings & {
+    readonly name?: string;
+    readonly cidrBlock: string;
+    readonly tags?: Readonly<Record<string, string>>;
+  };
+const requests = (props: NetworkProps) => ({
+  ...props,
+  create: modelFields<CreateSettings>(props, VPC.CreateVpcRequest, [
+    "regionId",
+    "vpcName",
+    "cidrBlock",
+    "tag",
+  ]),
+  modify: modelFields<MutableSettings>(props, VPC.ModifyVpcAttributeRequest, [
+    "regionId",
+    "vpcId",
+    "vpcName",
+    "cidrBlock",
+  ]),
+});
+const immutableCreate = (props: CreateSettings) =>
+  Object.fromEntries(
+    Object.entries(props).filter(
+      ([key]) => !["description", "enableIPv6"].includes(key),
+    ),
+  );
 
 export interface NetworkAttributes {
   readonly vpcId: string;
@@ -115,10 +139,7 @@ const retryableDeleteDependency = (error: AlibabaProviderError) =>
   isDependencyViolation(error) ||
   (error.code !== undefined && transientDeleteCodes.has(error.code));
 
-const modifyMatches = (
-  network: ObservedNetwork,
-  desired: NetworkProps["modify"],
-) =>
+const modifyMatches = (network: ObservedNetwork, desired: MutableSettings) =>
   desired === undefined ||
   ((desired.description === undefined ||
     network.description === desired.description) &&
@@ -238,13 +259,12 @@ export const NetworkProvider = (options: NetworkProviderOptions = {}) =>
         desired: Readonly<Record<string, string>>,
       ) {
         if (tagsEqual(observed, desired)) return;
-        const upsert = Object.fromEntries(
-          Object.entries(desired).filter(
-            ([key, value]) => observed[key] !== value,
-          ),
+        const { removed, upsert: entries } = diffTags(
+          { ...observed },
+          { ...desired },
         );
-        const removed = Object.keys(observed).filter(
-          (key) => !(key in desired),
+        const upsert = Object.fromEntries(
+          entries.map(({ Key, Value }) => [Key, Value]),
         );
         if (Object.keys(upsert).length > 0) {
           yield* retryingSdkCall("VPC", "TagResources", () =>
@@ -309,11 +329,17 @@ export const NetworkProvider = (options: NetworkProviderOptions = {}) =>
               }),
             ),
           ),
-        diff: Effect.fn(function* ({ olds, news }) {
-          if (!isResolved(news)) return undefined;
+        diff: Effect.fn(function* ({ olds: previous, news: input }) {
+          if (!isResolved(input)) return undefined;
+          const olds = requests(previous);
+          yield* validateDesiredInput(input, Network.Type);
+          const news = requests(input);
           return olds.name !== news.name ||
             olds.cidrBlock !== news.cidrBlock ||
-            !isDeepStrictEqual(olds.create, news.create)
+            !isDeepStrictEqual(
+              immutableCreate(olds.create),
+              immutableCreate(news.create),
+            )
             ? ({ action: "replace" } as const)
             : undefined;
         }),
@@ -329,10 +355,13 @@ export const NetworkProvider = (options: NetworkProviderOptions = {}) =>
         reconcile: Effect.fn(function* ({
           id,
           instanceId: resourceInstanceId,
-          news,
-          olds,
+          news: input,
+          olds: previous,
           output,
         }) {
+          yield* validateDesiredInput(input, Network.Type);
+          const news = requests(input);
+          const olds = previous === undefined ? undefined : requests(previous);
           const name = yield* physicalName(id, news.name ?? output?.name, 128);
           const tags = yield* desiredTags(id, news.tags);
           let network = yield* observe(output?.vpcId, name);
@@ -366,7 +395,13 @@ export const NetworkProvider = (options: NetworkProviderOptions = {}) =>
           );
           if (
             news.modify !== undefined &&
-            (!isDeepStrictEqual(news.modify, olds?.modify) ||
+            ((olds !== undefined
+              ? !isDeepStrictEqual(news.modify, olds.modify)
+              : Object.entries(news.modify).some(
+                  ([key, value]) =>
+                    value !== undefined &&
+                    !(key in VPC.CreateVpcRequest.types()),
+                )) ||
               !modifyMatches(network, news.modify))
           ) {
             yield* sdkCall("VPC", "ModifyVpcAttribute", () =>

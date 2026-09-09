@@ -22,7 +22,6 @@ import {
   SecurityIpGroup,
   SecurityIpGroupProvider,
 } from "./security-ip-group.ts";
-
 class StatefulRDSClient extends RDSClient {
   readonly transientFailures = new TestTransientFailures();
   instance:
@@ -55,7 +54,10 @@ class StatefulRDSClient extends RDSClient {
   instanceCreates = 0;
   instanceClientTokens: Array<string | undefined> = [];
   instanceCreateFailure:
-    | { readonly accepted: boolean; readonly code: string }
+    | {
+        readonly accepted: boolean;
+        readonly code: string;
+      }
     | undefined;
   instanceCreateStatus = "Running";
   instanceSpecModifies = 0;
@@ -74,11 +76,9 @@ class StatefulRDSClient extends RDSClient {
   privilegeRevokes = 0;
   securityGroupModifies = 0;
   securityGroupParentMissing = false;
-
   constructor() {
     super(testConfig());
   }
-
   override async describeDBInstanceAttribute(
     request: RDS.DescribeDBInstanceAttributeRequest,
   ): Promise<RDS.DescribeDBInstanceAttributeResponse> {
@@ -111,7 +111,6 @@ class StatefulRDSClient extends RDSClient {
       }),
     });
   }
-
   override async describeDBInstances(
     _request: RDS.DescribeDBInstancesRequest,
   ): Promise<RDS.DescribeDBInstancesResponse> {
@@ -133,7 +132,6 @@ class StatefulRDSClient extends RDSClient {
       }),
     });
   }
-
   override async createDBInstance(
     request: RDS.CreateDBInstanceRequest,
   ): Promise<RDS.CreateDBInstanceResponse> {
@@ -176,7 +174,6 @@ class StatefulRDSClient extends RDSClient {
       body: new RDS.CreateDBInstanceResponseBody({ DBInstanceId: "rm-test" }),
     });
   }
-
   override async listTagResources(
     _request: RDS.ListTagResourcesRequest,
   ): Promise<RDS.ListTagResourcesResponse> {
@@ -196,7 +193,6 @@ class StatefulRDSClient extends RDSClient {
       }),
     });
   }
-
   override async tagResources(
     request: RDS.TagResourcesRequest,
   ): Promise<RDS.TagResourcesResponse> {
@@ -207,14 +203,12 @@ class StatefulRDSClient extends RDSClient {
     }
     return new RDS.TagResourcesResponse({ statusCode: 200 });
   }
-
   override async untagResources(
     request: RDS.UntagResourcesRequest,
   ): Promise<RDS.UntagResourcesResponse> {
     for (const key of request.tagKey ?? []) this.tags.delete(key);
     return new RDS.UntagResourcesResponse({ statusCode: 200 });
   }
-
   override async describeDBInstanceSSL(
     _request: RDS.DescribeDBInstanceSSLRequest,
   ): Promise<RDS.DescribeDBInstanceSSLResponse> {
@@ -223,7 +217,6 @@ class StatefulRDSClient extends RDSClient {
       body: this.instance === undefined ? undefined : this.ssl,
     });
   }
-
   override async describeDBInstanceNetInfo(
     _request: RDS.DescribeDBInstanceNetInfoRequest,
   ): Promise<RDS.DescribeDBInstanceNetInfoResponse> {
@@ -240,7 +233,6 @@ class StatefulRDSClient extends RDSClient {
             }),
     });
   }
-
   override async modifyDBInstanceDescription(
     request: RDS.ModifyDBInstanceDescriptionRequest,
   ): Promise<RDS.ModifyDBInstanceDescriptionResponse> {
@@ -255,7 +247,6 @@ class StatefulRDSClient extends RDSClient {
     }
     return new RDS.ModifyDBInstanceDescriptionResponse({ statusCode: 200 });
   }
-
   override async modifyDBInstanceDeletionProtection(
     request: RDS.ModifyDBInstanceDeletionProtectionRequest,
   ): Promise<RDS.ModifyDBInstanceDeletionProtectionResponse> {
@@ -273,7 +264,6 @@ class StatefulRDSClient extends RDSClient {
       statusCode: 200,
     });
   }
-
   override async modifyDBInstanceSpec(
     request: RDS.ModifyDBInstanceSpecRequest,
   ): Promise<RDS.ModifyDBInstanceSpecResponse> {
@@ -297,7 +287,6 @@ class StatefulRDSClient extends RDSClient {
     }
     return new RDS.ModifyDBInstanceSpecResponse({ statusCode: 200 });
   }
-
   override async modifyDBInstanceSSL(
     request: RDS.ModifyDBInstanceSSLRequest,
   ): Promise<RDS.ModifyDBInstanceSSLResponse> {
@@ -318,7 +307,6 @@ class StatefulRDSClient extends RDSClient {
     });
     return new RDS.ModifyDBInstanceSSLResponse({ statusCode: 200 });
   }
-
   override async deleteDBInstance(
     _request: RDS.DeleteDBInstanceRequest,
   ): Promise<RDS.DeleteDBInstanceResponse> {
@@ -333,7 +321,6 @@ class StatefulRDSClient extends RDSClient {
     this.instance = undefined;
     return new RDS.DeleteDBInstanceResponse({ statusCode: 200 });
   }
-
   override async describeDatabases(
     request: RDS.DescribeDatabasesRequest,
   ): Promise<RDS.DescribeDatabasesResponse> {
@@ -351,7 +338,6 @@ class StatefulRDSClient extends RDSClient {
       }),
     });
   }
-
   override async createDatabase(
     request: RDS.CreateDatabaseRequest,
   ): Promise<RDS.CreateDatabaseResponse> {
@@ -373,7 +359,6 @@ class StatefulRDSClient extends RDSClient {
     }
     return new RDS.CreateDatabaseResponse({ statusCode: 200 });
   }
-
   override async modifyDBDescription(
     request: RDS.ModifyDBDescriptionRequest,
   ): Promise<RDS.ModifyDBDescriptionResponse> {
@@ -393,7 +378,6 @@ class StatefulRDSClient extends RDSClient {
     }
     return new RDS.ModifyDBDescriptionResponse({ statusCode: 200 });
   }
-
   override async deleteDatabase(
     request: RDS.DeleteDatabaseRequest,
   ): Promise<RDS.DeleteDatabaseResponse> {
@@ -402,7 +386,6 @@ class StatefulRDSClient extends RDSClient {
     if (request.DBName !== undefined) this.databases.delete(request.DBName);
     return new RDS.DeleteDatabaseResponse({ statusCode: 200 });
   }
-
   override async describeAccounts(
     request: RDS.DescribeAccountsRequest,
   ): Promise<RDS.DescribeAccountsResponse> {
@@ -419,7 +402,6 @@ class StatefulRDSClient extends RDSClient {
       }),
     });
   }
-
   override async createAccount(
     request: RDS.CreateAccountRequest,
   ): Promise<RDS.CreateAccountResponse> {
@@ -442,7 +424,6 @@ class StatefulRDSClient extends RDSClient {
     }
     return new RDS.CreateAccountResponse({ statusCode: 200 });
   }
-
   override async modifyAccountDescription(
     request: RDS.ModifyAccountDescriptionRequest,
   ): Promise<RDS.ModifyAccountDescriptionResponse> {
@@ -462,14 +443,12 @@ class StatefulRDSClient extends RDSClient {
     }
     return new RDS.ModifyAccountDescriptionResponse({ statusCode: 200 });
   }
-
   override async resetAccountPassword(
     _request: RDS.ResetAccountPasswordRequest,
   ): Promise<RDS.ResetAccountPasswordResponse> {
     this.passwordResets += 1;
     return new RDS.ResetAccountPasswordResponse({ statusCode: 200 });
   }
-
   override async deleteAccount(
     request: RDS.DeleteAccountRequest,
   ): Promise<RDS.DeleteAccountResponse> {
@@ -479,7 +458,6 @@ class StatefulRDSClient extends RDSClient {
       this.accounts.delete(request.accountName);
     return new RDS.DeleteAccountResponse({ statusCode: 200 });
   }
-
   override async grantAccountPrivilege(
     request: RDS.GrantAccountPrivilegeRequest,
   ): Promise<RDS.GrantAccountPrivilegeResponse> {
@@ -515,7 +493,6 @@ class StatefulRDSClient extends RDSClient {
     }
     return new RDS.GrantAccountPrivilegeResponse({ statusCode: 200 });
   }
-
   override async revokeAccountPrivilege(
     request: RDS.RevokeAccountPrivilegeRequest,
   ): Promise<RDS.RevokeAccountPrivilegeResponse> {
@@ -543,7 +520,6 @@ class StatefulRDSClient extends RDSClient {
     }
     return new RDS.RevokeAccountPrivilegeResponse({ statusCode: 200 });
   }
-
   override async describeDBInstanceIPArrayList(
     _request: RDS.DescribeDBInstanceIPArrayListRequest,
   ): Promise<RDS.DescribeDBInstanceIPArrayListResponse> {
@@ -559,7 +535,6 @@ class StatefulRDSClient extends RDSClient {
       }),
     });
   }
-
   override async modifySecurityIps(
     request: RDS.ModifySecurityIpsRequest,
   ): Promise<RDS.ModifySecurityIpsResponse> {
@@ -584,10 +559,8 @@ class StatefulRDSClient extends RDSClient {
     return new RDS.ModifySecurityIpsResponse({ statusCode: 200 });
   }
 }
-
 const providerLayer = (fake: StatefulRDSClient) =>
   Layer.succeed(AlibabaClients, testClientSet({ rds: fake }));
-
 describe("RDS provider lifecycles", () => {
   it("does not call RDS when an interrupted database has no instance identity", async () => {
     const fake = new StatefulRDSClient();
@@ -602,7 +575,6 @@ describe("RDS provider lifecycles", () => {
         output: undefined,
       });
     });
-
     await expect(
       Effect.runPromise(
         program.pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
@@ -610,7 +582,6 @@ describe("RDS provider lifecycles", () => {
     ).resolves.toBeUndefined();
     expect(fake.databaseReads).toBe(0);
   });
-
   it("creates, updates, and deletes an instance through transient teardown failures", async () => {
     const fake = new StatefulRDSClient();
     const layer = InstanceProvider({
@@ -620,21 +591,19 @@ describe("RDS provider lifecycles", () => {
     const base = resourceBase("rds");
     const initial = {
       name: "example-rds",
-      create: {
-        engine: "MySQL" as const,
-        engineVersion: "8.0",
-        DBInstanceClass: "mysql.n2.medium.1",
-        DBInstanceNetType: "Intranet" as const,
-        DBInstanceStorage: 20,
-        payType: "Postpaid" as const,
-        securityIPList: "127.0.0.1",
-      },
+      engine: "MySQL" as const,
+      engineVersion: "8.0",
+      DBInstanceClass: "mysql.n2.medium.1",
+      DBInstanceNetType: "Intranet" as const,
+      DBInstanceStorage: 20,
+      payType: "Postpaid" as const,
+      securityIPList: "127.0.0.1",
       tags: { environment: "dev" },
     };
     const changed = {
       ...initial,
       deletionProtection: true,
-      spec: { DBInstanceStorage: 40 },
+      DBInstanceStorage: 40,
       ssl: { SSLEnabled: 1 },
       tags: { environment: "test" },
     };
@@ -657,7 +626,6 @@ describe("RDS provider lifecycles", () => {
       yield* provider.delete({ ...base, olds: changed, output: updated });
       return updated;
     });
-
     const updated = await Effect.runPromise(
       program.pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
     );
@@ -677,7 +645,6 @@ describe("RDS provider lifecycles", () => {
     expect(fake.instanceDeletes).toBe(2);
     expect(fake.instance).toBeUndefined();
   });
-
   it("resumes an already-deleting RDS instance without another delete request", async () => {
     const fake = new StatefulRDSClient();
     const layer = InstanceProvider({ wait: { attempts: 2, interval: 0 } }).pipe(
@@ -686,15 +653,13 @@ describe("RDS provider lifecycles", () => {
     const base = resourceBase("rds-resumed-delete");
     const news = {
       name: "example-rds",
-      create: {
-        engine: "PostgreSQL" as const,
-        engineVersion: "18.0",
-        DBInstanceClass: "pg.n2.medium.1",
-        DBInstanceNetType: "Intranet" as const,
-        DBInstanceStorage: 20,
-        payType: "Postpaid" as const,
-        securityIPList: "127.0.0.1",
-      },
+      engine: "PostgreSQL" as const,
+      engineVersion: "18.0",
+      DBInstanceClass: "pg.n2.medium.1",
+      DBInstanceNetType: "Intranet" as const,
+      DBInstanceStorage: 20,
+      payType: "Postpaid" as const,
+      securityIPList: "127.0.0.1",
     };
     const program = Effect.gen(function* () {
       const provider = yield* Instance.Provider;
@@ -711,14 +676,12 @@ describe("RDS provider lifecycles", () => {
       fake.instanceReadsUntilAbsent = 1;
       yield* provider.delete({ ...base, olds: news, output: created });
     });
-
     await Effect.runPromise(
       program.pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
     );
     expect(fake.instanceDeletes).toBe(0);
     expect(fake.instance).toBeUndefined();
   });
-
   it("recovers an accepted RDS create after a concurrent-operation response", async () => {
     const fake = new StatefulRDSClient();
     fake.instanceCreateFailure = {
@@ -732,7 +695,6 @@ describe("RDS provider lifecycles", () => {
       createRecoveryWait: { attempts: 1, interval: 0 },
     }).pipe(Layer.provide(providerLayer(fake)));
     const base = resourceBase("rds-ambiguous-create");
-
     const created = await Effect.runPromise(
       Effect.gen(function* () {
         const provider = yield* Instance.Provider;
@@ -740,26 +702,22 @@ describe("RDS provider lifecycles", () => {
           ...base,
           news: {
             name: "example-rds",
-            create: {
-              engine: "PostgreSQL",
-              engineVersion: "18.0",
-              DBInstanceClass: "pg.n2.medium.1",
-              DBInstanceNetType: "Intranet",
-              DBInstanceStorage: 20,
-              payType: "Postpaid",
-              securityIPList: "127.0.0.1",
-            },
+            engine: "PostgreSQL",
+            engineVersion: "18.0",
+            DBInstanceClass: "pg.n2.medium.1",
+            DBInstanceNetType: "Intranet",
+            DBInstanceStorage: 20,
+            payType: "Postpaid",
+            securityIPList: "127.0.0.1",
           },
           olds: undefined,
           output: undefined,
         });
       }).pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
     );
-
     expect(created.instanceId).toBe("rm-test");
     expect(fake.instanceCreates).toBe(1);
   });
-
   it("preserves an ambiguous RDS create error when no instance appears", async () => {
     const fake = new StatefulRDSClient();
     fake.instanceCreateFailure = {
@@ -779,15 +737,13 @@ describe("RDS provider lifecycles", () => {
             ...base,
             news: {
               name: "example-rds",
-              create: {
-                engine: "PostgreSQL",
-                engineVersion: "18.0",
-                DBInstanceClass: "pg.n2.medium.1",
-                DBInstanceNetType: "Intranet",
-                DBInstanceStorage: 20,
-                payType: "Postpaid",
-                securityIPList: "127.0.0.1",
-              },
+              engine: "PostgreSQL",
+              engineVersion: "18.0",
+              DBInstanceClass: "pg.n2.medium.1",
+              DBInstanceNetType: "Intranet",
+              DBInstanceStorage: 20,
+              payType: "Postpaid",
+              securityIPList: "127.0.0.1",
             },
             olds: undefined,
             output: undefined,
@@ -795,13 +751,11 @@ describe("RDS provider lifecycles", () => {
         }).pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
       ),
     );
-
     expect(error).toMatchObject({
       _tag: "AlibabaProviderError",
       code: "InvalidConcurrentOperate",
     });
   });
-
   it("waits for a creating RDS instance before requesting deletion", async () => {
     const fake = new StatefulRDSClient();
     const layer = InstanceProvider({
@@ -811,15 +765,13 @@ describe("RDS provider lifecycles", () => {
     const base = resourceBase("rds-creating-delete");
     const news = {
       name: "example-rds",
-      create: {
-        engine: "PostgreSQL" as const,
-        engineVersion: "18.0",
-        DBInstanceClass: "pg.n2.medium.1",
-        DBInstanceNetType: "Intranet" as const,
-        DBInstanceStorage: 20,
-        payType: "Postpaid" as const,
-        securityIPList: "127.0.0.1",
-      },
+      engine: "PostgreSQL" as const,
+      engineVersion: "18.0",
+      DBInstanceClass: "pg.n2.medium.1",
+      DBInstanceNetType: "Intranet" as const,
+      DBInstanceStorage: 20,
+      payType: "Postpaid" as const,
+      securityIPList: "127.0.0.1",
     };
     const program = Effect.gen(function* () {
       const provider = yield* Instance.Provider;
@@ -839,14 +791,12 @@ describe("RDS provider lifecycles", () => {
       fake.instanceReadsUntilRunning = 2;
       yield* provider.delete({ ...base, olds: news, output: created });
     });
-
     await Effect.runPromise(
       program.pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
     );
     expect(fake.instanceDeletes).toBe(1);
     expect(fake.instance).toBeUndefined();
   });
-
   it("fails closed with the final RDS state when deletion never becomes valid", async () => {
     const fake = new StatefulRDSClient();
     const layer = InstanceProvider({
@@ -856,15 +806,13 @@ describe("RDS provider lifecycles", () => {
     const base = resourceBase("rds-delete-state-timeout");
     const news = {
       name: "example-rds",
-      create: {
-        engine: "PostgreSQL" as const,
-        engineVersion: "18.0",
-        DBInstanceClass: "pg.n2.medium.1",
-        DBInstanceNetType: "Intranet" as const,
-        DBInstanceStorage: 20,
-        payType: "Postpaid" as const,
-        securityIPList: "127.0.0.1",
-      },
+      engine: "PostgreSQL" as const,
+      engineVersion: "18.0",
+      DBInstanceClass: "pg.n2.medium.1",
+      DBInstanceNetType: "Intranet" as const,
+      DBInstanceStorage: 20,
+      payType: "Postpaid" as const,
+      securityIPList: "127.0.0.1",
     };
     const program = Effect.gen(function* () {
       const provider = yield* Instance.Provider;
@@ -883,7 +831,6 @@ describe("RDS provider lifecycles", () => {
         );
       yield* provider.delete({ ...base, olds: news, output: created });
     });
-
     await expect(
       Effect.runPromise(
         program.pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
@@ -898,7 +845,63 @@ describe("RDS provider lifecycles", () => {
     expect(fake.instanceDeletes).toBe(0);
     expect(fake.instance).toBeDefined();
   });
-
+  it("finishes instance deletion when RDS reports InvalidDBInstanceName.NotFound", async () => {
+    const fake = new StatefulRDSClient();
+    fake.describeDBInstanceAttribute = async () => {
+      throw { code: "InvalidDBInstanceName.NotFound", statusCode: 400 };
+    };
+    const layer = InstanceProvider({ wait: { attempts: 2, interval: 0 } }).pipe(
+      Layer.provide(providerLayer(fake)),
+    );
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const provider = yield* Instance.Provider;
+        yield* provider.delete({
+          ...resourceBase("released-rds"),
+          olds: {
+            engine: "PostgreSQL",
+            engineVersion: "16.0",
+            DBInstanceClass: "test",
+            DBInstanceNetType: "Intranet",
+            DBInstanceStorage: 20,
+            payType: "Postpaid",
+            securityIPList: "127.0.0.1",
+          },
+          output: {
+            instanceId: "rm-test",
+            name: "example",
+            status: "Running",
+            deletionProtection: false,
+            tags: {},
+          },
+        });
+      }).pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
+    );
+    expect(fake.instanceDeletes).toBe(0);
+  });
+  it("does not repeat DeleteDatabase after the database is already absent", async () => {
+    const fake = new StatefulRDSClient();
+    fake.transientFailures.failNext("DeleteDatabase");
+    const layer = DatabaseProvider({ wait: { attempts: 2, interval: 0 } }).pipe(
+      Layer.provide(providerLayer(fake)),
+    );
+    const props = {
+      instanceId: "rm-test",
+      name: "example",
+      characterSetName: "UTF8",
+    };
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const provider = yield* Database.Provider;
+        yield* provider.delete({
+          ...resourceBase("absent-db"),
+          olds: props,
+          output: { ...props, status: "Running" },
+        });
+      }).pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
+    );
+    expect(fake.databaseDeletes).toBe(0);
+  });
   it("creates, updates, and deletes a database after a transient failure", async () => {
     const fake = new StatefulRDSClient();
     const layer = DatabaseProvider({ wait: { attempts: 2, interval: 0 } }).pipe(
@@ -930,7 +933,6 @@ describe("RDS provider lifecycles", () => {
       yield* provider.delete({ ...base, olds: changed, output: updated });
       return updated;
     });
-
     await expect(
       Effect.runPromise(
         program.pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
@@ -941,7 +943,6 @@ describe("RDS provider lifecycles", () => {
     expect(fake.databaseDeletes).toBe(2);
     expect(fake.databases.size).toBe(0);
   });
-
   it("creates, updates, rotates, and deletes an account after a transient failure", async () => {
     const fake = new StatefulRDSClient();
     const layer = AccountProvider({ wait: { attempts: 2, interval: 0 } }).pipe(
@@ -978,7 +979,6 @@ describe("RDS provider lifecycles", () => {
       yield* provider.delete({ ...base, olds: changed, output: updated });
       return updated;
     });
-
     await expect(
       Effect.runPromise(
         program.pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
@@ -989,7 +989,6 @@ describe("RDS provider lifecycles", () => {
     expect(fake.passwordResets).toBe(1);
     expect(fake.accountDeletes).toBe(2);
   });
-
   it("grants, changes, and revokes a privilege after a transient failure", async () => {
     const fake = new StatefulRDSClient();
     fake.accounts.set(
@@ -1032,7 +1031,6 @@ describe("RDS provider lifecycles", () => {
       yield* provider.delete({ ...base, olds: changed, output: updated });
       return updated;
     });
-
     await expect(
       Effect.runPromise(
         program.pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
@@ -1041,7 +1039,6 @@ describe("RDS provider lifecycles", () => {
     expect(fake.privilegeGrants).toBe(2);
     expect(fake.privilegeRevokes).toBe(2);
   });
-
   it("normalizes PostgreSQL DBOwner from the database read model", async () => {
     const fake = new StatefulRDSClient();
     fake.accounts.set(
@@ -1093,7 +1090,6 @@ describe("RDS provider lifecycles", () => {
         output: undefined,
       });
     });
-
     await expect(
       Effect.runPromise(
         program.pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
@@ -1101,7 +1097,71 @@ describe("RDS provider lifecycles", () => {
     ).resolves.toMatchObject(props);
     expect(fake.privilegeGrants).toBe(0);
   });
-
+  it.each([true, false])(
+    "handles PostgreSQL privilege deletion with binding present=%s",
+    async (present) => {
+      const fake = new StatefulRDSClient();
+      fake.instance =
+        new RDS.DescribeDBInstanceAttributeResponseBodyItemsDBInstanceAttribute(
+          {
+            DBInstanceId: "rm-test",
+            engine: "PostgreSQL",
+          },
+        );
+      fake.accounts.set(
+        "owner",
+        new RDS.DescribeAccountsResponseBodyAccountsDBInstanceAccount({
+          accountName: "owner",
+          accountType: "Normal",
+        }),
+      );
+      if (present)
+        fake.databases.set(
+          "example",
+          new RDS.DescribeDatabasesResponseBodyDatabasesDatabase({
+            DBName: "example",
+            accounts:
+              new RDS.DescribeDatabasesResponseBodyDatabasesDatabaseAccounts({
+                accountPrivilegeInfo: [
+                  new RDS.DescribeDatabasesResponseBodyDatabasesDatabaseAccountsAccountPrivilegeInfo(
+                    {
+                      account: "owner",
+                      accountPrivilege: "ALL",
+                    },
+                  ),
+                ],
+              }),
+          }),
+        );
+      const props = {
+        instanceId: "rm-test",
+        accountName: "owner",
+        databaseName: "example",
+        privilege: "DBOwner" as const,
+      };
+      const layer = AccountPrivilegeProvider({
+        wait: { attempts: 2, interval: 0 },
+      }).pipe(Layer.provide(providerLayer(fake)));
+      const result = Effect.runPromise(
+        Effect.gen(function* () {
+          const provider = yield* AccountPrivilege.Provider;
+          return yield* provider.delete({
+            ...resourceBase("pg-delete"),
+            olds: props,
+            output: props,
+          });
+        }).pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
+      );
+      if (present)
+        await expect(result).rejects.toThrow(
+          "PostgreSQL does not support RevokeAccountPrivilege",
+        );
+      else await expect(result).resolves.toBeUndefined();
+      expect(fake.privilegeRevokes).toBe(0);
+      expect(fake.databaseDeletes).toBe(0);
+      expect(fake.accountDeletes).toBe(0);
+    },
+  );
   it("does not revoke implicit access from a PostgreSQL privileged account", async () => {
     const fake = new StatefulRDSClient();
     fake.accounts.set(
@@ -1138,7 +1198,6 @@ describe("RDS provider lifecycles", () => {
       wait: { attempts: 2, interval: 0 },
     }).pipe(Layer.provide(providerLayer(fake)));
     const base = resourceBase("privileged-account");
-
     await expect(
       Effect.runPromise(
         Effect.gen(function* () {
@@ -1163,7 +1222,6 @@ describe("RDS provider lifecycles", () => {
     ).resolves.toBeUndefined();
     expect(fake.privilegeRevokes).toBe(0);
   });
-
   it("covers and resets a security IP group after a transient failure", async () => {
     const fake = new StatefulRDSClient();
     const layer = SecurityIpGroupProvider({
@@ -1196,7 +1254,6 @@ describe("RDS provider lifecycles", () => {
       yield* provider.delete({ ...base, olds: changed, output: updated });
       return updated;
     });
-
     const updated = await Effect.runPromise(
       program.pipe(Effect.provide(layer), Effect.provide(alchemyTestRuntime)),
     );
@@ -1206,7 +1263,6 @@ describe("RDS provider lifecycles", () => {
     );
     expect(fake.securityGroupModifies).toBe(4);
   });
-
   it("finishes security IP group cleanup when the parent instance is gone", async () => {
     const fake = new StatefulRDSClient();
     fake.securityGroupParentMissing = true;
@@ -1220,7 +1276,6 @@ describe("RDS provider lifecycles", () => {
       securityIps: ["10.0.0.0/16"],
       resetTo: ["127.0.0.1"],
     };
-
     await expect(
       Effect.runPromise(
         Effect.gen(function* () {

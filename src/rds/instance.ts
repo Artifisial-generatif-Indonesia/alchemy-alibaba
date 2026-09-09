@@ -1,9 +1,16 @@
+import { validateDesiredInput } from "../internal/desired-input.ts";
+import { modelFields } from "../internal/model-input.ts";
+import {
+  uniqueMatch,
+  replacement,
+  requireRecoveryOwnership,
+} from "../internal/identity.ts";
 import * as RDS from "@alicloud/rds20140815";
 import { Unowned } from "alchemy/AdoptPolicy";
 import { isResolved } from "alchemy/Diff";
 import * as Provider from "alchemy/Provider";
 import { Resource } from "alchemy/Resource";
-import { hasAlchemyTags } from "alchemy/Tags";
+import { hasAlchemyTags, diffTags } from "alchemy/Tags";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
@@ -36,13 +43,19 @@ import {
 } from "../internal/lifecycle.ts";
 import type { Without } from "../internal/model-input.ts";
 import type { Providers } from "../providers.ts";
+import {
+  configurationMatches,
+  instanceConfiguration,
+  type ConfigurationAttributes,
+  type InstanceConfiguration,
+} from "./configuration.ts";
 
 type RDSInstanceCreateRequest = Without<
   RDS.CreateDBInstanceRequest,
   "DBInstanceDescription" | "tag"
 >;
 
-export type RDSInstanceCreate = Omit<
+type RDSInstanceCreate = Omit<
   RDSInstanceCreateRequest,
   | "DBInstanceClass"
   | "DBInstanceNetType"
@@ -68,11 +81,29 @@ export type RDSInstanceCreate = Omit<
   readonly securityIPList: string;
 };
 
-export interface InstanceProps {
+/** Spec fields with observed convergence support. Deferred changes are not supported. */
+type InstanceSpec = Pick<
+  Without<RDS.ModifyDBInstanceSpecRequest, "DBInstanceId">,
+  | "DBInstanceClass"
+  | "DBInstanceStorage"
+  | "DBInstanceStorageType"
+  | "engineVersion"
+  | "category"
+  | "serverlessConfiguration"
+  | "compressionMode"
+  | "direction"
+  | "allowMajorVersionUpgrade"
+  | "autoUseCoupon"
+> & { readonly effectiveTime?: "Immediate" };
+
+interface InstanceSettings extends InstanceConfiguration {
+  /** Restore to a new instance. The source is never modified. Changing this replaces the target. */
+  readonly restoreFrom?: { readonly instanceId: string } & (
+    | { readonly backupId: string; readonly restoreTime?: never }
+    | { readonly restoreTime: string; readonly backupId?: never }
+  );
   readonly name?: string;
-  readonly create: RDSInstanceCreate;
   readonly deletionProtection?: boolean;
-  readonly spec?: Without<RDS.ModifyDBInstanceSpecRequest, "DBInstanceId">;
   readonly ssl?: Without<
     RDS.ModifyDBInstanceSSLRequest,
     "DBInstanceId" | "passWord" | "serverKey"
@@ -83,7 +114,52 @@ export interface InstanceProps {
   readonly tags?: Readonly<Record<string, string>>;
 }
 
-export interface InstanceAttributes {
+/** Desired RDS configuration. There are no separate creation or resize values. */
+export type InstanceProps = InstanceSettings &
+  RDSInstanceCreate &
+  Omit<InstanceSpec, keyof RDSInstanceCreate | "serverlessConfiguration">;
+
+const mutableCreateFields = [
+  "DBInstanceClass",
+  "DBInstanceStorage",
+  "DBInstanceStorageType",
+  "category",
+  "securityIPList",
+  "serverlessConfig",
+  "engineVersion",
+  "deletionProtection",
+] as const;
+const immutableCreate = (create: RDSInstanceCreate) =>
+  Object.fromEntries(
+    Object.entries(create).filter(
+      ([key]) =>
+        !mutableCreateFields.includes(
+          key as (typeof mutableCreateFields)[number],
+        ),
+    ),
+  );
+const requests = (props: InstanceProps) => ({
+  ...props,
+  create: modelFields<RDSInstanceCreate>(props, RDS.CreateDBInstanceRequest, [
+    "DBInstanceDescription",
+    "tag",
+  ]),
+  spec: {
+    DBInstanceClass: props.DBInstanceClass,
+    DBInstanceStorage: props.DBInstanceStorage,
+    DBInstanceStorageType: props.DBInstanceStorageType,
+    engineVersion: props.engineVersion,
+    category: props.category,
+    serverlessConfiguration: props.serverlessConfig,
+    compressionMode: props.compressionMode,
+    direction: props.direction,
+    effectiveTime: props.effectiveTime,
+    allowMajorVersionUpgrade: props.allowMajorVersionUpgrade,
+    autoUseCoupon: props.autoUseCoupon,
+  },
+});
+
+export interface InstanceAttributes extends ConfigurationAttributes {
   readonly instanceId: string;
   readonly name: string;
   readonly status: string;
@@ -190,7 +266,10 @@ const requireSingleInstance = (amount: number | undefined) =>
         }),
       );
 
-const specMatches = (instance: ObservedInstance, spec: InstanceProps["spec"]) =>
+const specMatches = (
+  instance: ObservedInstance,
+  spec: InstanceSpec | undefined,
+) =>
   spec === undefined ||
   ((spec.DBInstanceClass === undefined ||
     spec.DBInstanceClass === instance.DBInstanceClass) &&
@@ -209,7 +288,46 @@ const specMatches = (instance: ObservedInstance, spec: InstanceProps["spec"]) =>
         instance.serverlessConfig?.scaleMax) &&
     (spec.serverlessConfiguration?.autoPause === undefined ||
       spec.serverlessConfiguration.autoPause ===
-        instance.serverlessConfig?.autoPause));
+        instance.serverlessConfig?.autoPause) &&
+    (spec.serverlessConfiguration?.switchForce === undefined ||
+      spec.serverlessConfiguration.switchForce ===
+        instance.serverlessConfig?.switchForce) &&
+    (spec.compressionMode === undefined ||
+      spec.compressionMode === instance.compressionMode));
+
+const validateSpec = (spec: InstanceSpec | undefined) => {
+  const supported = new Set([
+    "DBInstanceClass",
+    "DBInstanceStorage",
+    "DBInstanceStorageType",
+    "engineVersion",
+    "category",
+    "serverlessConfiguration",
+    "compressionMode",
+    "direction",
+    "effectiveTime",
+    "allowMajorVersionUpgrade",
+    "autoUseCoupon",
+  ]);
+  const unsupported = Object.entries(spec ?? {})
+    .filter(([key, value]) => value !== undefined && !supported.has(key))
+    .map(([key]) => key);
+  if (
+    unsupported.length ||
+    (spec?.effectiveTime !== undefined && spec.effectiveTime !== "Immediate")
+  ) {
+    return Effect.fail(
+      new AlibabaInvariantError({
+        resourceType: Instance.Type,
+        operation: "ValidateSpec",
+        message: unsupported.length
+          ? `Unsupported RDS spec fields: ${unsupported.join(", ")}`
+          : "Deferred RDS spec changes are not supported; use effectiveTime Immediate",
+      }),
+    );
+  }
+  return Effect.void;
+};
 
 export interface InstanceProviderOptions {
   readonly wait?: WaitOptions;
@@ -224,7 +342,8 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
     Instance,
     Effect.gen(function* () {
       const clients = yield* AlibabaClients;
-      const createRequest = (create: InstanceProps["create"]) => ({
+      const configuration = instanceConfiguration(clients, options.wait);
+      const createRequest = (create: RDSInstanceCreate) => ({
         ...create,
         regionId: create.regionId ?? clients.regionId,
       });
@@ -264,12 +383,15 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
               })),
             ),
         }).pipe(
-          Effect.map(
-            (instances) =>
-              instances.find(
+          Effect.flatMap((instances) =>
+            uniqueMatch(
+              instances.filter(
                 (instance) => instance.DBInstanceDescription === name,
-              )?.DBInstanceId,
+              ),
+              Instance.Type,
+            ),
           ),
+          Effect.map((instance) => instance?.DBInstanceId),
           Effect.flatMap((instanceId) =>
             instanceId === undefined
               ? Effect.succeed(undefined)
@@ -278,15 +400,7 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
         );
 
       const observe = (instanceId: string | undefined, name: string) =>
-        instanceId === undefined
-          ? findByName(name)
-          : getById(instanceId).pipe(
-              Effect.flatMap((instance) =>
-                instance === undefined
-                  ? findByName(name)
-                  : Effect.succeed(instance),
-              ),
-            );
+        instanceId === undefined ? findByName(name) : getById(instanceId);
 
       const getTags = (instanceId: string) =>
         retryingSdkCall("RDS", "ListTagResources", () =>
@@ -348,7 +462,10 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
           ),
         );
 
-      const toAttributes = Effect.fn(function* (instance: ObservedInstance) {
+      const toAttributes = Effect.fn(function* (
+        instance: ObservedInstance,
+        settings: InstanceConfiguration = {},
+      ) {
         const instanceId = yield* requireValue(
           instance.DBInstanceId,
           Instance.Type,
@@ -367,6 +484,11 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
           getNetwork(instanceId),
         ]);
         return {
+          ...(yield* configuration.read(
+            instanceId,
+            settings,
+            instance.maintainTime,
+          )),
           instanceId,
           name,
           status: instance.DBInstanceStatus ?? "Unknown",
@@ -402,13 +524,12 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
         desired: Readonly<Record<string, string>>,
       ) {
         if (tagsEqual(observed, desired)) return;
-        const upsert = Object.fromEntries(
-          Object.entries(desired).filter(
-            ([key, value]) => observed[key] !== value,
-          ),
+        const { removed, upsert: entries } = diffTags(
+          { ...observed },
+          { ...desired },
         );
-        const removed = Object.keys(observed).filter(
-          (key) => !(key in desired),
+        const upsert = Object.fromEntries(
+          entries.map(({ Key, Value }) => [Key, Value]),
         );
         if (Object.keys(upsert).length > 0) {
           yield* retryingSdkCall("RDS", "TagResources", () =>
@@ -496,8 +617,12 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
             ),
             Effect.map((groups) => groups.flat()),
           ),
-        diff: Effect.fn(function* ({ olds, news }) {
-          if (!isResolved(news)) return undefined;
+        diff: Effect.fn(function* ({ olds: previous, news: input, output }) {
+          if (!isResolved(input)) return undefined;
+          const olds = requests(previous);
+          yield* validateDesiredInput(input, Instance.Type);
+          const news = requests(input);
+          yield* validateSpec(news.spec);
           if (
             olds.create === undefined ||
             (news.create.VPCId !== undefined &&
@@ -507,15 +632,34 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
           ) {
             return undefined;
           }
-          return olds.name !== news.name ||
+          if (
+            olds.name !== news.name ||
+            !isDeepStrictEqual(olds.restoreFrom, news.restoreFrom) ||
             !isDeepStrictEqual(
-              createRequest(olds.create),
-              createRequest(news.create),
+              immutableCreate(createRequest(olds.create)),
+              immutableCreate(createRequest(news.create)),
             )
-            ? ({ action: "replace" } as const)
-            : undefined;
+          )
+            return yield* replacement(Instance.Type, olds.name, news.name);
+          if (output !== undefined) {
+            const observed = yield* getById(output.instanceId);
+            if (
+              observed !== undefined &&
+              (!specMatches(observed, news.spec) ||
+                !configurationMatches(
+                  yield* configuration.read(
+                    output.instanceId,
+                    news,
+                    observed.maintainTime,
+                  ),
+                  news,
+                ))
+            )
+              return { action: "update" };
+          }
         }),
-        read: Effect.fn(function* ({ id, olds, output }) {
+        read: Effect.fn(function* ({ id, olds: input, output }) {
+          const olds = requests(input);
           yield* requireSingleInstance(olds.create?.amount);
           yield* requireRegion(
             Instance.Type,
@@ -537,7 +681,7 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
             "RDS returned an instance without DBInstanceId",
           );
           const tags = yield* getTags(instanceId);
-          const attributes = yield* toAttributes(instance);
+          const attributes = yield* toAttributes(instance, olds);
           return (yield* hasAlchemyTags(id, tags))
             ? attributes
             : Unowned(attributes);
@@ -545,10 +689,15 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
         reconcile: Effect.fn(function* ({
           id,
           instanceId: resourceInstanceId,
-          news,
-          olds,
+          news: input,
+          olds: previous,
           output,
+          session,
         }) {
+          yield* validateDesiredInput(input, Instance.Type);
+          const news = requests(input);
+          const olds = previous === undefined ? undefined : requests(previous);
+          yield* validateSpec(news.spec);
           yield* requireRegion(
             Instance.Type,
             clients.regionId,
@@ -561,6 +710,17 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
           );
           yield* requireSingleInstance(news.create.amount);
           yield* requireSingleInstance(olds?.create?.amount);
+          if (
+            news.restoreFrom &&
+            [news.restoreFrom.backupId, news.restoreFrom.restoreTime].filter(
+              (value) => value !== undefined,
+            ).length !== 1
+          )
+            return yield* new AlibabaInvariantError({
+              resourceType: Instance.Type,
+              operation: "ValidateRestore",
+              message: "A restore requires exactly one backupId or restoreTime",
+            });
           if (
             news.ssl === undefined &&
             (news.sslPassword !== undefined || news.sslServerKey !== undefined)
@@ -575,50 +735,109 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
           const name = yield* physicalName(id, news.name ?? output?.name, 64);
           const tags = yield* desiredTags(id, news.tags);
           let instance = yield* observe(output?.instanceId, name);
+          if (instance?.DBInstanceId && output === undefined)
+            yield* requireRecoveryOwnership(
+              id,
+              Instance.Type,
+              yield* getTags(instance.DBInstanceId),
+            );
           if (instance === undefined) {
-            const creation = yield* retryingSdkCall(
-              "RDS",
-              "CreateDBInstance",
-              () =>
-                clients.rds.createDBInstance(
-                  new RDS.CreateDBInstanceRequest({
-                    ...createRequest(news.create),
-                    DBInstanceDescription: name,
-                    clientToken:
-                      news.create.clientToken ?? `create-${resourceInstanceId}`,
-                    tag: tagList(tags),
-                  }),
-                ),
-            ).pipe(
+            yield* session.note(`Creating RDS instance ${name}`);
+            if (news.restoreFrom) {
+              const source = yield* getById(news.restoreFrom.instanceId);
+              if (
+                !source ||
+                source.engine !== news.create.engine ||
+                source.engineVersion !== news.create.engineVersion ||
+                news.create.payType === "Prepaid"
+              )
+                return yield* new AlibabaInvariantError({
+                  resourceType: Instance.Type,
+                  operation: "ValidateRestore",
+                  message:
+                    "Restore requires an existing source with the requested engine/version and a postpaid target",
+                });
+            }
+            const createOperation =
+              news.restoreFrom === undefined
+                ? retryingSdkCall("RDS", "CreateDBInstance", () =>
+                    clients.rds.createDBInstance(
+                      new RDS.CreateDBInstanceRequest({
+                        ...createRequest(news.create),
+                        DBInstanceDescription: name,
+                        clientToken:
+                          news.create.clientToken ??
+                          `create-${resourceInstanceId}`,
+                        tag: tagList(tags),
+                      }),
+                    ),
+                  )
+                : retryingSdkCall("RDS", "CloneDBInstance", () =>
+                    clients.rds.cloneDBInstance(
+                      new RDS.CloneDBInstanceRequest({
+                        DBInstanceId: news.restoreFrom!.instanceId,
+                        backupId: news.restoreFrom!.backupId,
+                        restoreTime: news.restoreFrom!.restoreTime,
+                        DBInstanceDescription: name,
+                        DBInstanceClass: news.create.DBInstanceClass,
+                        DBInstanceStorage: news.create.DBInstanceStorage,
+                        DBInstanceStorageType:
+                          news.create.DBInstanceStorageType,
+                        category: news.create.category,
+                        payType: news.create.payType,
+                        regionId: clients.regionId,
+                        VPCId: news.create.VPCId,
+                        vSwitchId: news.create.vSwitchId,
+                        zoneId: news.create.zoneId,
+                        clientToken: `create-${resourceInstanceId}`,
+                      }),
+                    ),
+                  );
+            const creation = yield* createOperation.pipe(
               Effect.map(
                 (response) => ({ _tag: "Requested", response }) as const,
               ),
-              Effect.catchIf(isAmbiguousCreate, (requestError) =>
-                waitForPresent({
-                  service: "RDS",
-                  operation: "RecoverCreateDBInstance",
-                  read: observe(undefined, name),
-                  // Presence proves the tokenized request was accepted. The
-                  // ordinary readiness waiter below still requires Running.
-                  ready: () => true,
-                  wait: options.createRecoveryWait ?? {
-                    attempts: 13,
-                    interval: "5 seconds",
-                  },
-                }).pipe(
-                  Effect.map(
-                    (instance) => ({ _tag: "Observed", instance }) as const,
+              // CloneDBInstance cannot set ownership tags at creation. A name
+              // alone cannot prove ownership after an ambiguous clone response.
+              Effect.catchIf(
+                (error) =>
+                  news.restoreFrom === undefined && isAmbiguousCreate(error),
+                (requestError) =>
+                  waitForPresent({
+                    service: "RDS",
+                    operation: "RecoverCreateDBInstance",
+                    read: observe(undefined, name),
+                    // Presence proves the tokenized request was accepted. The
+                    // ordinary readiness waiter below still requires Running.
+                    ready: () => true,
+                    wait: options.createRecoveryWait ?? {
+                      attempts: 13,
+                      interval: "5 seconds",
+                    },
+                  }).pipe(
+                    Effect.map(
+                      (instance) => ({ _tag: "Observed", instance }) as const,
+                    ),
+                    Effect.catchTag("AlibabaWaitTimeoutError", () =>
+                      Effect.fail(requestError),
+                    ),
                   ),
-                  Effect.catchTag("AlibabaWaitTimeoutError", () =>
-                    Effect.fail(requestError),
-                  ),
-                ),
               ),
             );
             const createdInstanceId =
               creation._tag === "Observed"
                 ? creation.instance.DBInstanceId
                 : creation.response.body?.DBInstanceId;
+            if (
+              creation._tag === "Observed" &&
+              createdInstanceId &&
+              news.restoreFrom === undefined
+            )
+              yield* requireRecoveryOwnership(
+                id,
+                Instance.Type,
+                yield* getTags(createdInstanceId),
+              );
             if (createdInstanceId?.includes(",")) {
               return yield* new AlibabaInvariantError({
                 resourceType: Instance.Type,
@@ -682,6 +901,7 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
           // A previous attempt may have completed the purchase before state
           // was persisted. Observed convergence must prevent a second resize.
           if (!specMatches(instance, news.spec)) {
+            yield* session.note(`Updating RDS specification ${instanceId}`);
             yield* sdkCall("RDS", "ModifyDBInstanceSpec", () =>
               clients.rds.modifyDBInstanceSpec(
                 new RDS.ModifyDBInstanceSpecRequest({
@@ -698,6 +918,22 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
               wait: options.wait,
             });
           }
+          if (
+            (news.restoreFrom !== undefined && olds === undefined) ||
+            (olds !== undefined &&
+              olds.create.securityIPList !== news.create.securityIPList)
+          ) {
+            yield* retryingSdkCall("RDS", "ModifySecurityIps", () =>
+              clients.rds.modifySecurityIps(
+                new RDS.ModifySecurityIpsRequest({
+                  DBInstanceId: instanceId,
+                  DBInstanceIPArrayName: "Default",
+                  securityIps: news.create.securityIPList,
+                }),
+              ),
+            );
+          }
+          yield* configuration.sync(instanceId, news, instance.maintainTime);
           const observedSsl = yield* getSsl(instanceId);
           if (
             !sslMatches(observedSsl, news.ssl) ||
@@ -736,8 +972,23 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
             yield* waitForPresent({
               service: "RDS",
               operation: "ModifyDBInstanceSSL",
-              read: getSsl(instanceId),
-              ready: (value) => sslMatches(value, news.ssl),
+              read: getSsl(instanceId).pipe(
+                Effect.flatMap((value) =>
+                  value?.lastModifyStatus?.toLowerCase() === "failed"
+                    ? Effect.fail(
+                        new AlibabaInvariantError({
+                          resourceType: Instance.Type,
+                          operation: "ModifyDBInstanceSSL",
+                          message: "RDS SSL configuration failed",
+                        }),
+                      )
+                    : Effect.succeed(value),
+                ),
+              ),
+              ready: (value) =>
+                sslMatches(value, news.ssl) &&
+                (value?.lastModifyStatus === undefined ||
+                  value.lastModifyStatus.toLowerCase() === "success"),
               wait: options.wait,
             });
           }
@@ -756,6 +1007,8 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
             ready: (value) =>
               ready(value) &&
               specMatches(value, news.spec) &&
+              (news.maintenanceWindow === undefined ||
+                value.maintainTime === news.maintenanceWindow) &&
               value.deletionProtection === (news.deletionProtection ?? false),
             wait: options.wait,
           });
@@ -769,9 +1022,10 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
               typeof value.port === "string",
             wait: options.wait,
           });
-          return yield* toAttributes(fresh);
+          return yield* toAttributes(fresh, news);
         }),
-        delete: Effect.fn(function* ({ output, olds }) {
+        delete: Effect.fn(function* ({ output, olds: input }) {
+          const olds = requests(input);
           yield* requireSingleInstance(olds.create?.amount);
           yield* requireRegion(
             Instance.Type,

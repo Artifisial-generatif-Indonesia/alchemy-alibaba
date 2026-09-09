@@ -1,9 +1,11 @@
+import { validateDesiredInput } from "../internal/desired-input.ts";
+import { modelFields } from "../internal/model-input.ts";
 import * as Tair from "@alicloud/r-kvstore20150101";
 import { Unowned } from "alchemy/AdoptPolicy";
 import { isResolved } from "alchemy/Diff";
 import * as Provider from "alchemy/Provider";
 import { Resource } from "alchemy/Resource";
-import { hasAlchemyTags } from "alchemy/Tags";
+import { hasAlchemyTags, diffTags } from "alchemy/Tags";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
@@ -38,15 +40,17 @@ import {
 import type { Without } from "../internal/model-input.ts";
 import type { Providers } from "../providers.ts";
 
-export interface InstanceProps {
+type CreateSettings = Without<
+  Tair.CreateInstanceRequest,
+  "instanceName" | "password" | "tag"
+>;
+type SpecSettings = Without<Tair.ModifyInstanceSpecRequest, "instanceId">;
+export interface InstanceProps
+  extends CreateSettings,
+    Omit<SpecSettings, keyof CreateSettings | "majorVersion"> {
   readonly name?: string;
-  readonly create: Without<
-    Tair.CreateInstanceRequest,
-    "instanceName" | "password" | "tag"
-  >;
   readonly password?: Redacted.Redacted<string>;
   readonly releaseProtection?: boolean;
-  readonly spec?: Without<Tair.ModifyInstanceSpecRequest, "instanceId">;
   readonly ssl?: "Enable" | "Disable";
   /** Redis maxmemory policy. Queue-backed workloads require noeviction. */
   readonly evictionPolicy?:
@@ -63,6 +67,37 @@ export interface InstanceProps {
   readonly delete?: Without<Tair.DeleteInstanceRequest, "instanceId">;
   readonly tags?: Readonly<Record<string, string>>;
 }
+
+const mutableCreateFields = [
+  "instanceClass",
+  "engineVersion",
+  "nodeType",
+  "readOnlyCount",
+  "replicaCount",
+  "shardCount",
+  "slaveReadOnlyCount",
+  "slaveReplicaCount",
+  "secondaryZoneId",
+];
+const immutableCreate = (props: CreateSettings) =>
+  Object.fromEntries(
+    Object.entries(props).filter(([key]) => !mutableCreateFields.includes(key)),
+  );
+const requests = (props: InstanceProps) => ({
+  ...props,
+  create: modelFields<CreateSettings>(props, Tair.CreateInstanceRequest, [
+    "instanceName",
+    "password",
+    "tag",
+  ]),
+  spec: {
+    ...modelFields<SpecSettings>(props, Tair.ModifyInstanceSpecRequest, [
+      "instanceId",
+      "majorVersion",
+    ]),
+    majorVersion: props.engineVersion,
+  },
+});
 
 export interface InstanceAttributes {
   readonly instanceId: string;
@@ -126,13 +161,28 @@ const tagRecord = (
 const tagList = (tags: Readonly<Record<string, string>>) =>
   Object.entries(tags).map(([key, value]) => ({ key, value }));
 
-const specMatches = (instance: ObservedInstance, spec: InstanceProps["spec"]) =>
+// Create/modify use MASTER_SLAVE or STAND_ALONE for cloud-native instances,
+// while DescribeInstanceAttribute reports the equivalent double or single.
+// Normalize only comparisons; preserve the requested vocabulary on the wire.
+const observedNodeType = (value: string | undefined) =>
+  value === "MASTER_SLAVE"
+    ? "double"
+    : value === "STAND_ALONE"
+      ? "single"
+      : value;
+
+const specMatches = (
+  instance: ObservedInstance,
+  spec: SpecSettings | undefined,
+) =>
   spec === undefined ||
   ((spec.instanceClass === undefined ||
     spec.instanceClass === instance.instanceClass) &&
     (spec.majorVersion === undefined ||
       spec.majorVersion === instance.engineVersion) &&
-    (spec.nodeType === undefined || spec.nodeType === instance.nodeType) &&
+    (spec.nodeType === undefined ||
+      observedNodeType(spec.nodeType) ===
+        observedNodeType(instance.nodeType)) &&
     (spec.readOnlyCount === undefined ||
       spec.readOnlyCount === instance.readOnlyCount) &&
     (spec.replicaCount === undefined ||
@@ -156,7 +206,7 @@ const specMatches = (instance: ObservedInstance, spec: InstanceProps["spec"]) =>
  */
 const specClientToken = (
   resourceInstanceId: string,
-  spec: InstanceProps["spec"],
+  spec: SpecSettings | undefined,
   operationId: string,
 ): string =>
   `spec-${createHash("sha256")
@@ -212,10 +262,7 @@ const withIdentity = (
   );
 };
 
-const endpointReady = (
-  instance: ObservedInstance,
-  desired: InstanceProps["create"],
-) =>
+const endpointReady = (instance: ObservedInstance, desired: CreateSettings) =>
   desired.networkType !== "VPC" ||
   (typeof instance.connectionDomain === "string" &&
     typeof instance.port === "number");
@@ -250,7 +297,7 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
     Instance,
     Effect.gen(function* () {
       const clients = yield* AlibabaClients;
-      const createRequest = (create: InstanceProps["create"]) => ({
+      const createRequest = (create: CreateSettings) => ({
         ...create,
         regionId: create.regionId ?? clients.regionId,
       });
@@ -476,13 +523,12 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
         desired: Readonly<Record<string, string>>,
       ) {
         if (tagsEqual(observed, desired)) return;
-        const upsert = Object.fromEntries(
-          Object.entries(desired).filter(
-            ([key, value]) => observed[key] !== value,
-          ),
+        const { removed, upsert: entries } = diffTags(
+          { ...observed },
+          { ...desired },
         );
-        const removed = Object.keys(observed).filter(
-          (key) => !(key in desired),
+        const upsert = Object.fromEntries(
+          entries.map(({ Key, Value }) => [Key, Value]),
         );
         if (Object.keys(upsert).length > 0) {
           yield* retryingSdkCall("Tair", "TagResources", () =>
@@ -543,8 +589,11 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
             ),
             Effect.map((groups) => groups.flat()),
           ),
-        diff: Effect.fn(function* ({ olds, news }) {
-          if (!isResolved(news)) return undefined;
+        diff: Effect.fn(function* ({ olds: previous, news: input }) {
+          if (!isResolved(input)) return undefined;
+          const olds = requests(previous);
+          yield* validateDesiredInput(input, Instance.Type);
+          const news = requests(input);
           if (
             olds.create === undefined ||
             (news.create.vpcId !== undefined &&
@@ -556,13 +605,14 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
           }
           return olds.name !== news.name ||
             !isDeepStrictEqual(
-              createRequest(olds.create),
-              createRequest(news.create),
+              immutableCreate(createRequest(olds.create)),
+              immutableCreate(createRequest(news.create)),
             )
             ? ({ action: "replace" } as const)
             : undefined;
         }),
-        read: Effect.fn(function* ({ id, olds, output }) {
+        read: Effect.fn(function* ({ id, olds: input, output }) {
+          const olds = requests(input);
           yield* requireRegion(
             Instance.Type,
             clients.regionId,
@@ -584,10 +634,13 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
         reconcile: Effect.fn(function* ({
           id,
           instanceId: resourceInstanceId,
-          news,
-          olds,
+          news: input,
+          olds: previous,
           output,
         }) {
+          yield* validateDesiredInput(input, Instance.Type);
+          const news = requests(input);
+          const olds = previous === undefined ? undefined : requests(previous);
           yield* requireRegion(
             Instance.Type,
             clients.regionId,
@@ -729,10 +782,17 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
                 news.spec,
                 yield* Effect.sync(randomUUID),
               );
+            // Cloud-native Redis 7 rejects MajorVersion even during a
+            // size-only change. Do not request an unchanged upgrade.
+            const majorVersion =
+              news.spec.majorVersion === instance.engineVersion
+                ? undefined
+                : news.spec.majorVersion;
             yield* requestMutation("ModifyInstanceSpec", () =>
               clients.tair.modifyInstanceSpec(
                 new Tair.ModifyInstanceSpecRequest({
                   ...news.spec,
+                  majorVersion,
                   instanceId,
                   clientToken: token,
                 }),
@@ -833,7 +893,8 @@ export const InstanceProvider = (options: InstanceProviderOptions = {}) =>
           });
           return yield* toAttributes(fresh);
         }),
-        delete: Effect.fn(function* ({ output, olds }) {
+        delete: Effect.fn(function* ({ output, olds: input }) {
+          const olds = requests(input);
           yield* requireRegion(
             Instance.Type,
             clients.regionId,

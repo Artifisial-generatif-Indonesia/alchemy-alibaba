@@ -14,8 +14,7 @@ import {
   protocolMakeOptions,
   protocolStack,
 } from "./stack.ts";
-
-describe("Example relationship protocol coverage", { timeout: 30_000 }, () => {
+describe("Example relationship protocol coverage", { timeout: 30000 }, () => {
   it("rejects concurrent vSwitch creation in the same VPC", async () => {
     await withProtocolHarness(async ({ clients, world }) => {
       const vpc = await clients.vpc.createVpc(
@@ -50,7 +49,6 @@ describe("Example relationship protocol coverage", { timeout: 30_000 }, () => {
       expect(created.body?.vSwitchId).toMatch(/^vsw-test/);
     });
   });
-
   it("recovers an ambiguous RDS create and refuses delete while Creating", async () => {
     await withTempDir(async (directory) => {
       await withProtocolHarness(
@@ -77,19 +75,20 @@ describe("Example relationship protocol coverage", { timeout: 30_000 }, () => {
               });
               const rds = yield* AlibabaRDS.Instance("rds", {
                 name: "protocol-rds",
-                create: {
-                  engine: "PostgreSQL",
-                  engineVersion: "16.0",
-                  DBInstanceClass: "pg.n2.small.1",
-                  DBInstanceNetType: "Intranet",
-                  DBInstanceStorage: 20,
-                  payType: "Postpaid",
-                  securityIPList: "127.0.0.1",
-                  VPCId: network.vpcId,
-                  vSwitchId: vswitch.vSwitchId,
-                },
+                engine: "PostgreSQL",
+                engineVersion: "16.0",
+                DBInstanceClass: "pg.n2.small.1",
+                DBInstanceNetType: "Intranet",
+                DBInstanceStorage: 20,
+                payType: "Postpaid",
+                securityIPList: "127.0.0.1",
+                VPCId: network.vpcId,
+                vSwitchId: vswitch.vSwitchId,
               });
-              return { instanceId: rds.instanceId, vswitchId: vswitch.vSwitchId };
+              return {
+                instanceId: rds.instanceId,
+                vswitchId: vswitch.vSwitchId,
+              };
             }),
           );
           const created = await deployProtocol(options, stack);
@@ -97,6 +96,10 @@ describe("Example relationship protocol coverage", { timeout: 30_000 }, () => {
           expect(
             world.captured.filter((item) => item.action === "CreateDBInstance"),
           ).toHaveLength(1);
+          world.script({
+            action: "DeleteVSwitch",
+            code: "DependencyViolation.Rds",
+          });
           await destroyProtocol(options, stack);
           expect(world.rds.size).toBe(0);
           expect(world.eniDependencyRejections).toBeGreaterThan(0);
@@ -105,7 +108,6 @@ describe("Example relationship protocol coverage", { timeout: 30_000 }, () => {
       );
     });
   });
-
   it("rejects DeleteDBInstance while the instance is still Creating", async () => {
     await withProtocolHarness(
       async ({ clients }) => {
@@ -133,7 +135,6 @@ describe("Example relationship protocol coverage", { timeout: 30_000 }, () => {
       { rdsDescribesUntilRunning: 99 },
     );
   });
-
   it("leaves managed ENIs after ACK deletion and links ACR to the vSwitch", async () => {
     await withTempDir(async (directory) => {
       await withProtocolHarness(async ({ server, world }) => {
@@ -154,16 +155,14 @@ describe("Example relationship protocol coverage", { timeout: 30_000 }, () => {
             });
             const cluster = yield* AlibabaACK.ManagedCluster("cluster", {
               name: "protocol-ack",
-              create: {
-                clusterType: "ManagedKubernetes",
-                clusterSpec: "ack.pro.small",
-                profile: "Default",
-                addons: [{ name: "flannel" }],
-                vpcid: network.vpcId,
-                vswitchIds: [vswitch.vSwitchId],
-                containerCidr: "172.20.0.0/16",
-                serviceCidr: "172.21.0.0/20",
-              },
+              clusterType: "ManagedKubernetes",
+              clusterSpec: "ack.pro.small",
+              profile: "Default",
+              addons: [{ name: "flannel" }],
+              vpcid: network.vpcId,
+              vswitchIds: [vswitch.vSwitchId],
+              containerCidr: "172.20.0.0/16",
+              serviceCidr: "172.21.0.0/20",
             });
             const registry = yield* ACR.InstanceReference("registry", {
               instanceId: "cri-retained",
@@ -172,6 +171,7 @@ describe("Example relationship protocol coverage", { timeout: 30_000 }, () => {
               instanceId: registry.instanceId,
               vpcId: network.vpcId,
               vswitchId: vswitch.vSwitchId,
+              enablePrivateZoneRecord: true,
             });
             return {
               clusterId: cluster.clusterId,
@@ -184,6 +184,11 @@ describe("Example relationship protocol coverage", { timeout: 30_000 }, () => {
         const created = await deployProtocol(options, stack);
         expect(created.clusterId).toMatch(/^c-test/);
         expect(created.linkStatus).toBe("RUNNING");
+        expect(
+          world.captured.find(
+            (x) => x.action === "CreateInstanceVpcEndpointLinkedVpc",
+          )?.enablePrivateZoneRecord,
+        ).toBe("true");
         await destroyProtocol(options, stack);
         expect(world.ack.size).toBe(0);
         expect(world.acrLinks).toHaveLength(0);
@@ -192,7 +197,6 @@ describe("Example relationship protocol coverage", { timeout: 30_000 }, () => {
       });
     });
   });
-
   it("creates ACK clusters through the real ROA client and leaves ENIs after delete", async () => {
     await withProtocolHarness(async ({ clients, world }) => {
       const created = await clients.ack.createCluster(

@@ -1,8 +1,10 @@
 import ACRClientImport from "@alicloud/cr20181201";
 import { $OpenApiUtil } from "@alicloud/openapi-core";
+import ECSClientImport from "@alicloud/ecs20140526";
 import ACKClientImport from "@alicloud/cs20151215";
 import TairClientImport from "@alicloud/r-kvstore20150101";
 import RDSClientImport from "@alicloud/rds20140815";
+import RAMClientImport from "@alicloud/ram20150501";
 import VPCClientImport from "@alicloud/vpc20160428";
 import * as Layer from "effect/Layer";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -30,9 +32,11 @@ const interopDefault = <Value>(value: Value | CommonJsDefault<Value>): Value =>
   hasCommonJsDefault(value) ? value.default : value;
 
 const ACRClient = interopDefault(ACRClientImport);
+const ECSClient = interopDefault(ECSClientImport);
 const ACKClient = interopDefault(ACKClientImport);
 const RDSClient = interopDefault(RDSClientImport);
 const TairClient = interopDefault(TairClientImport);
+const RAMClient = interopDefault(RAMClientImport);
 const VPCClient = interopDefault(VPCClientImport);
 
 const clientConfig = (host: string) =>
@@ -47,10 +51,12 @@ const clientConfig = (host: string) =>
   });
 
 export const protocolClients = (host: string): AlibabaClientSet => ({
+  ecs: new ECSClient(clientConfig(host)),
   ack: new ACKClient(clientConfig(host)),
   acr: new ACRClient(clientConfig(host)),
   tair: new TairClient(clientConfig(host)),
   rds: new RDSClient(clientConfig(host)),
+  ram: new RAMClient(clientConfig(host)),
   vpc: new VPCClient(clientConfig(host)),
   regionId: "ap-southeast-5",
 });

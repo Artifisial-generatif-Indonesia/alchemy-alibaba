@@ -1,6 +1,7 @@
+import type { RoaBody } from "./roa-resources.ts";
 import http from "node:http";
 import { URLSearchParams } from "node:url";
-import { assertNoSecrets, redactText } from "./redaction.ts";
+import { assertNoSecrets, redactText, redactValue } from "./redaction.ts";
 import {
   param,
   tagKeysFrom,
@@ -10,7 +11,8 @@ import {
   type RpcParams,
 } from "./world.ts";
 
-const SENSITIVE_PARAM = /^(?:AccessKeyId|AccessKeySecret|Signature|SecurityToken|Password|BearerToken)$/i;
+const SENSITIVE_PARAM =
+  /^(?:AccessKeyId|AccessKeySecret|Signature|SecurityToken|AccountPassword|Password|ServerKey|UserData|BearerToken)$/i;
 
 const readBody = (request: http.IncomingMessage): Promise<string> =>
   new Promise((resolve, reject) => {
@@ -20,8 +22,14 @@ const readBody = (request: http.IncomingMessage): Promise<string> =>
     request.on("error", reject);
   });
 
-const paramsFrom = (search: string, body: string, contentType: string | undefined): RpcParams => {
-  const merged = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+const paramsFrom = (
+  search: string,
+  body: string,
+  contentType: string | undefined,
+): RpcParams => {
+  const merged = new URLSearchParams(
+    search.startsWith("?") ? search.slice(1) : search,
+  );
   if (
     body.length > 0 &&
     (contentType === undefined ||
@@ -34,12 +42,12 @@ const paramsFrom = (search: string, body: string, contentType: string | undefine
   return Object.fromEntries(merged.entries());
 };
 
-const jsonBody = (body: string): Record<string, unknown> => {
+const jsonBody = (body: string): RoaBody => {
   if (body.trim().length === 0) return {};
   try {
     const parsed: unknown = JSON.parse(body);
-    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
+    return parsed !== null && typeof parsed === "object"
+      ? (redactValue(parsed) as RoaBody)
       : {};
   } catch {
     return {};
@@ -54,7 +62,8 @@ const captureFrom = (
   action: string | undefined,
   version: string | undefined,
 ): CapturedRequest => {
-  const password = param(params, "Password");
+  const password =
+    param(params, "AccountPassword") ?? param(params, "Password");
   return {
     method,
     pathname,
@@ -77,6 +86,10 @@ const captureFrom = (
     pageNumber: param(params, "PageNumber"),
     pageSize: param(params, "PageSize"),
     sslEnabled: param(params, "SSLEnabled"),
+    hasServerKey: !!param(params, "ServerKey"),
+    connectionString: param(params, "ConnectionString"),
+    deletionProtection: param(params, "DeletionProtection"),
+    enablePrivateZoneRecord: param(params, "EnableCreateDNSRecordInPvzt"),
   };
 };
 
@@ -145,8 +158,10 @@ export const listenProtocolServer = (
                 request.method ?? "GET",
                 url.pathname,
                 jsonBody(body),
+                params,
+                action,
               )
-            : world.dispatchRpc(action ?? "", paramsFrom(url.search, body, request.headers["content-type"]));
+            : world.dispatchRpc(action ?? "", params, version);
           writeJson(response, result);
         } catch (cause) {
           const message = redactText(

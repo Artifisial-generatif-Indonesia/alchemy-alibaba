@@ -1,9 +1,11 @@
+import { validateDesiredInput } from "../internal/desired-input.ts";
+import { modelFields } from "../internal/model-input.ts";
 import * as VPC from "@alicloud/vpc20160428";
 import { Unowned } from "alchemy/AdoptPolicy";
 import { isResolved } from "alchemy/Diff";
 import * as Provider from "alchemy/Provider";
 import { Resource } from "alchemy/Resource";
-import { hasAlchemyTags } from "alchemy/Tags";
+import { hasAlchemyTags, diffTags } from "alchemy/Tags";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Semaphore from "effect/Semaphore";
@@ -34,21 +36,44 @@ import {
 import type { Without } from "../internal/model-input.ts";
 import type { Providers } from "../providers.ts";
 
-export interface VSwitchProps {
-  readonly vpcId: string;
-  readonly name?: string;
-  readonly cidrBlock: string;
-  readonly zoneId: string;
-  readonly create?: Without<
-    VPC.CreateVSwitchRequest,
-    "regionId" | "vpcId" | "vSwitchName" | "cidrBlock" | "zoneId" | "tag"
-  >;
-  readonly modify?: Without<
+type CreateSettings = Without<
+  VPC.CreateVSwitchRequest,
+  "regionId" | "vpcId" | "vSwitchName" | "cidrBlock" | "zoneId" | "tag"
+>;
+type MutableSettings = Without<
+  VPC.ModifyVSwitchAttributeRequest,
+  "regionId" | "vSwitchId" | "vSwitchName"
+>;
+export type VSwitchProps = CreateSettings &
+  MutableSettings & {
+    readonly name?: string;
+    readonly cidrBlock: string;
+    readonly tags?: Readonly<Record<string, string>>;
+    readonly vpcId: string;
+    readonly zoneId: string;
+  };
+const requests = (props: VSwitchProps) => ({
+  ...props,
+  create: modelFields<CreateSettings>(props, VPC.CreateVSwitchRequest, [
+    "regionId",
+    "vpcId",
+    "vSwitchName",
+    "cidrBlock",
+    "zoneId",
+    "tag",
+  ]),
+  modify: modelFields<MutableSettings>(
+    props,
     VPC.ModifyVSwitchAttributeRequest,
-    "regionId" | "vSwitchId" | "vSwitchName"
-  >;
-  readonly tags?: Readonly<Record<string, string>>;
-}
+    ["regionId", "vSwitchId", "vSwitchName"],
+  ),
+});
+const immutableCreate = (props: CreateSettings) =>
+  Object.fromEntries(
+    Object.entries(props).filter(
+      ([key]) => !["description", "enableIPv6"].includes(key),
+    ),
+  );
 
 export interface VSwitchAttributes {
   readonly vSwitchId: string;
@@ -114,13 +139,11 @@ const retryableDeleteDependency = (error: AlibabaProviderError) =>
   (isDependencyViolation(error) &&
     (error.code === "DependencyViolation" ||
       error.code === "DependencyViolation.NetworkInterface" ||
-      error.code === "DependencyViolation.Kvstore")) ||
+      error.code === "DependencyViolation.Kvstore" ||
+      error.code === "DependencyViolation.Rds")) ||
   (error.code !== undefined && transientDeleteCodes.has(error.code));
 
-const modifyMatches = (
-  vswitch: ObservedVSwitch,
-  desired: VSwitchProps["modify"],
-) =>
+const modifyMatches = (vswitch: ObservedVSwitch, desired: MutableSettings) =>
   desired === undefined ||
   ((desired.description === undefined ||
     vswitch.description === desired.description) &&
@@ -275,13 +298,12 @@ export const VSwitchProvider = (options: VSwitchProviderOptions = {}) =>
         desired: Readonly<Record<string, string>>,
       ) {
         if (tagsEqual(observed, desired)) return;
-        const upsert = Object.fromEntries(
-          Object.entries(desired).filter(
-            ([key, value]) => observed[key] !== value,
-          ),
+        const { removed, upsert: entries } = diffTags(
+          { ...observed },
+          { ...desired },
         );
-        const removed = Object.keys(observed).filter(
-          (key) => !(key in desired),
+        const upsert = Object.fromEntries(
+          entries.map(({ Key, Value }) => [Key, Value]),
         );
         if (Object.keys(upsert).length > 0) {
           yield* retryingSdkCall("VPC", "TagResources", () =>
@@ -366,14 +388,20 @@ export const VSwitchProvider = (options: VSwitchProviderOptions = {}) =>
             ),
             Effect.map((groups) => groups.flat()),
           ),
-        diff: Effect.fn(function* ({ olds, news }) {
-          if (!isResolved(news)) return undefined;
+        diff: Effect.fn(function* ({ olds: previous, news: input }) {
+          if (!isResolved(input)) return undefined;
+          const olds = requests(previous);
+          yield* validateDesiredInput(input, VSwitch.Type);
+          const news = requests(input);
           if (olds.vpcId === undefined) return undefined;
           return olds.vpcId !== news.vpcId ||
             olds.name !== news.name ||
             olds.cidrBlock !== news.cidrBlock ||
             olds.zoneId !== news.zoneId ||
-            !isDeepStrictEqual(olds.create, news.create)
+            !isDeepStrictEqual(
+              immutableCreate(olds.create),
+              immutableCreate(news.create),
+            )
             ? ({ action: "replace" } as const)
             : undefined;
         }),
@@ -391,10 +419,13 @@ export const VSwitchProvider = (options: VSwitchProviderOptions = {}) =>
         reconcile: Effect.fn(function* ({
           id,
           instanceId: resourceInstanceId,
-          news,
-          olds,
+          news: input,
+          olds: previous,
           output,
         }) {
+          yield* validateDesiredInput(input, VSwitch.Type);
+          const news = requests(input);
+          const olds = previous === undefined ? undefined : requests(previous);
           const name = yield* physicalName(id, news.name ?? output?.name, 128);
           const tags = yield* desiredTags(id, news.tags);
           let vswitch = yield* observe(news.vpcId, output?.vSwitchId, name);
@@ -449,7 +480,13 @@ export const VSwitchProvider = (options: VSwitchProviderOptions = {}) =>
           );
           if (
             news.modify !== undefined &&
-            (!isDeepStrictEqual(news.modify, olds?.modify) ||
+            ((olds !== undefined
+              ? !isDeepStrictEqual(news.modify, olds.modify)
+              : Object.entries(news.modify).some(
+                  ([key, value]) =>
+                    value !== undefined &&
+                    !(key in VPC.CreateVSwitchRequest.types()),
+                )) ||
               !modifyMatches(vswitch, news.modify))
           ) {
             yield* sdkCall("VPC", "ModifyVSwitchAttribute", () =>
@@ -481,7 +518,7 @@ export const VSwitchProvider = (options: VSwitchProviderOptions = {}) =>
         delete: Effect.fn(function* ({ output }) {
           // Managed services can disappear from their own APIs before Alibaba
           // releases their vSwitch attachment. Retry only the generic API
-          // response, explicit ENI/Kvstore dependencies, and documented
+          // response, explicit ENI/Kvstore/RDS dependencies, and documented
           // transient statuses. Permanent dependencies such as a Network ACL
           // stay loud.
           type DeleteDecision = Data.TaggedEnum<{

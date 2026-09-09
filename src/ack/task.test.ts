@@ -23,6 +23,44 @@ class TaskACKClient extends ACKClient {
 }
 
 describe("ACK asynchronous tasks", () => {
+  it("allows a task to finish beyond the shared wait's 20-minute observation budget", async () => {
+    const client = new TaskACKClient([
+      ...Array.from({ length: 181 }, () =>
+        new ACK.DescribeTaskInfoResponseBody({ state: "running" }),
+      ),
+      new ACK.DescribeTaskInfoResponseBody({ state: "success" }),
+    ]);
+    await Effect.runPromise(
+      waitForTask({
+        client,
+        operation: "ModifyClusterNodePool",
+        taskId: "T-long-drain",
+        wait: { interval: 0 },
+      }),
+    );
+    expect(client.reads).toBe(182);
+  });
+
+  it("honors an explicitly shorter task wait", async () => {
+    const client = new TaskACKClient([
+      new ACK.DescribeTaskInfoResponseBody({ state: "running" }),
+    ]);
+    await expect(
+      Effect.runPromise(
+        waitForTask({
+          client,
+          operation: "ModifyClusterNodePool",
+          taskId: "T-stuck",
+          wait: { attempts: 2, interval: 0 },
+        }),
+      ),
+    ).rejects.toMatchObject({
+      _tag: "AlibabaWaitTimeoutError",
+      attempts: 2,
+    });
+    expect(client.reads).toBe(2);
+  });
+
   it("waits until the task reports success", async () => {
     const client = new TaskACKClient([
       new ACK.DescribeTaskInfoResponseBody({ state: "running" }),

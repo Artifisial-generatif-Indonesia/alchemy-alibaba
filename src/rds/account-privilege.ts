@@ -5,6 +5,7 @@ import { Resource } from "alchemy/Resource";
 import * as Effect from "effect/Effect";
 import { AlibabaClients } from "../clients.ts";
 import {
+  AlibabaInvariantError,
   isNotFound,
   retryingSdkCall,
   sdkCall,
@@ -278,6 +279,40 @@ export const AccountPrivilegeProvider = (
             Effect.catchIf(isNotFound, () => Effect.succeed(true)),
           );
           if (accountHasImplicitAccess) return;
+
+          if (
+            (yield* get(
+              output.instanceId,
+              output.accountName,
+              output.databaseName,
+            )) === undefined
+          )
+            return;
+
+          const instance = yield* retryingSdkCall(
+            "RDS",
+            "DescribeDBInstanceAttribute",
+            () =>
+              clients.rds.describeDBInstanceAttribute(
+                new RDS.DescribeDBInstanceAttributeRequest({
+                  DBInstanceId: output.instanceId,
+                }),
+              ),
+          );
+          if (
+            instance.body?.items?.DBInstanceAttribute?.some(
+              (item) =>
+                item.DBInstanceId === output.instanceId &&
+                item.engine === "PostgreSQL",
+            )
+          ) {
+            return yield* new AlibabaInvariantError({
+              resourceType: "Alibaba.RDS.AccountPrivilege",
+              operation: "delete",
+              message:
+                "PostgreSQL does not support RevokeAccountPrivilege. Remove this binding through reviewed SQL ownership/permission changes before retrying. The provider will not drop the database or account to revoke access.",
+            });
+          }
 
           yield* retryingSdkCall("RDS", "RevokeAccountPrivilege", () =>
             clients.rds.revokeAccountPrivilege(

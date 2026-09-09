@@ -1,4 +1,5 @@
 import ACRClient, * as ACR from "@alicloud/cr20181201";
+import ECSClient from "@alicloud/ecs20140526";
 import ACKClient from "@alicloud/cs20151215";
 import { $OpenApiUtil } from "@alicloud/openapi-core";
 import TairClient from "@alicloud/r-kvstore20150101";
@@ -125,11 +126,13 @@ const alchemyRuntime = Layer.mergeAll(
 );
 
 const clientSet = (acr: ACRClient): AlibabaClientSet => ({
+  ecs: new ECSClient(config()),
   ack: new ACKClient(config()),
   acr,
   tair: new TairClient(config()),
   rds: new RDSClient(config()),
   vpc: new VPCClient(config()),
+  ram: new RAMClient(config()),
   regionId: "ap-southeast-5",
 });
 
@@ -157,6 +160,16 @@ describe("Alibaba Alchemy provider", () => {
       "Alibaba.ACR.Namespace",
       "Alibaba.ACR.Repository",
       "Alibaba.ACR.VpcEndpointLink",
+      "Alibaba.ECS.Disk",
+      "Alibaba.ECS.DiskAttachment",
+      "Alibaba.ECS.Instance",
+      "Alibaba.ECS.KeyPair",
+      "Alibaba.ECS.SecurityGroup",
+      "Alibaba.ECS.SecurityGroupEgress",
+      "Alibaba.ECS.SecurityGroupIngress",
+      "Alibaba.RAM.Policy",
+      "Alibaba.RAM.Role",
+      "Alibaba.RAM.RolePolicyAttachment",
       "Alibaba.RDS.Account",
       "Alibaba.RDS.AccountPrivilege",
       "Alibaba.RDS.Database",
@@ -165,8 +178,13 @@ describe("Alibaba Alchemy provider", () => {
       "Alibaba.Tair.Account",
       "Alibaba.Tair.Instance",
       "Alibaba.Tair.SecurityIpGroup",
+      "Alibaba.VPC.Eip",
+      "Alibaba.VPC.EipAssociation",
+      "Alibaba.VPC.NatGateway",
       "Alibaba.VPC.Network",
+      "Alibaba.VPC.SnatEntry",
       "Alibaba.VPC.VSwitch",
+      "Kubernetes.Secret",
     ]);
   });
 
@@ -500,3 +518,4 @@ describe("Alibaba Alchemy provider", () => {
     expect(result).toBe("Running");
   });
 });
+import RAMClient from "@alicloud/ram20150501";

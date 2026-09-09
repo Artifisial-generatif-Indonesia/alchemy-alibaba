@@ -1,3 +1,6 @@
+import { EcsResources } from "./ecs-resources.ts";
+import { RoaResources, type RoaBody } from "./roa-resources.ts";
+import { RpcResources } from "./rpc-resources.ts";
 export type RpcParams = Record<string, string>;
 
 export interface CapturedRequest {
@@ -19,6 +22,10 @@ export interface CapturedRequest {
   readonly pageNumber?: string;
   readonly pageSize?: string;
   readonly sslEnabled?: string;
+  readonly hasServerKey?: boolean;
+  readonly connectionString?: string;
+  readonly deletionProtection?: string;
+  readonly enablePrivateZoneRecord?: string;
 }
 
 export interface ScriptedFault {
@@ -37,10 +44,13 @@ export interface ProtocolResponse {
 
 type TairStatus = "Creating" | "Normal" | "Released" | "Destroyed";
 type VSwitchStatus = "Pending" | "Available";
-type RdsStatus = "Creating" | "Running" | "Deleting";
+type RdsStatus = "Creating" | "Running" | "Deleting" | "Modifying";
 type AckState = "creating" | "running" | "deleting";
 
 interface TairRecord {
+  nodeType?: string;
+  instanceClass: string;
+  engineVersion?: string;
   instanceId: string;
   name: string;
   status: TairStatus;
@@ -79,6 +89,29 @@ interface VSwitchRecord {
 }
 
 interface RdsRecord {
+  regionId: string;
+  engine: string;
+  instanceClass: string;
+  storage: number;
+  storageType?: string;
+  engineVersion?: string;
+  category?: string;
+  serverless?: {
+    ScaleMin?: number;
+    ScaleMax?: number;
+    AutoPause?: boolean;
+    SwitchForce?: boolean;
+  };
+  compressionMode?: string;
+  backupPolicy?: Record<string, unknown>;
+  parameters?: Record<string, string>;
+  runningParameters?: Record<string, string>;
+  maxConnections?: number;
+  maintainTime?: string;
+  deletionProtection: boolean;
+  ssl: Record<string, unknown>;
+  sslReads: number;
+  pendingSpec?: () => void;
   instanceId: string;
   name: string;
   status: RdsStatus;
@@ -90,6 +123,7 @@ interface RdsRecord {
 }
 
 interface AckRecord {
+  clusterSpec?: string;
   clusterId: string;
   name: string;
   state: AckState;
@@ -180,12 +214,19 @@ export class ProtocolWorld {
   tairDetailReadOmissions: number;
   eniHoldAfterDelete: number;
   createVSwitchBusy = false;
+  rdsSslFailure = false;
+  rdsPublicEndpoint = false;
   eniDependencyRejections = 0;
 
   readonly networks = new Map<string, NetworkRecord>();
   readonly vswitches = new Map<string, VSwitchRecord>();
   readonly tair = new Map<string, TairRecord>();
   readonly rds = new Map<string, RdsRecord>();
+  readonly ecs = new EcsResources();
+  readonly connectivity = new VpcConnectivity();
+  readonly ram = new RamResources();
+  readonly resources = new RpcResources((id) => this.rds.get(id)?.engine);
+  readonly roa = new RoaResources();
   readonly ack = new Map<string, AckRecord>();
   readonly acrLinks: AcrLink[] = [];
   readonly enis: EniRecord[] = [];
@@ -224,7 +265,8 @@ export class ProtocolWorld {
   }
 
   tairCreates(): number {
-    return this.captured.filter((item) => item.action === "CreateInstance").length;
+    return this.captured.filter((item) => item.action === "CreateInstance")
+      .length;
   }
 
   actions(): string[] {
@@ -234,18 +276,43 @@ export class ProtocolWorld {
   }
 
   activeTair(): TairRecord[] {
-    return [...this.tair.values()].filter((item) => item.status !== "Destroyed");
+    return [...this.tair.values()].filter(
+      (item) => item.status !== "Destroyed",
+    );
   }
 
   capture(request: CapturedRequest): void {
     this.captured.push(request);
   }
 
-  dispatchRpc(action: string, params: RpcParams): ProtocolResponse {
+  dispatchRpc(
+    action: string,
+    params: RpcParams,
+    version?: string,
+  ): ProtocolResponse {
     const fault = this.consumeFault(action);
     if (fault?.omitIdentity !== true && fault && fault.accept !== true) {
-      return errorBody(fault.code, fault.code);
+      return {
+        ...errorBody(fault.code, fault.code),
+        statusCode: fault.statusCode ?? 400,
+      };
     }
+
+    const child =
+      version === "2015-05-01"
+        ? this.ram.dispatch(action, params)
+        : version === "2014-05-26"
+          ? this.ecs.dispatch(action, params)
+          : ((version === "2016-04-28"
+              ? this.connectivity.dispatch(action, params)
+              : undefined) ?? this.resources.dispatch(action, params, version));
+    if (child)
+      return fault?.accept
+        ? {
+            ...errorBody(fault.code, fault.code),
+            statusCode: fault.statusCode ?? 400,
+          }
+        : child;
 
     switch (action) {
       case "CreateVpc":
@@ -291,8 +358,19 @@ export class ProtocolWorld {
         return this.modifyTairConfig(params);
       case "ModifyInstanceAttribute":
         return this.modifyTairAttribute(params);
-      case "ModifyInstanceSpec":
+      case "ModifyInstanceSpec": {
+        const record = this.tair.get(params.InstanceId ?? "");
+        if (!record) return errorBody("InvalidInstanceId.NotFound", "absent");
+        if (params.MajorVersion === "7.0")
+          return errorBody(
+            "InvalidParameter",
+            'The specified parameter "MajorVersion" is not valid.',
+          );
+        record.nodeType = params.NodeType ?? record.nodeType;
+        record.instanceClass = params.InstanceClass ?? record.instanceClass;
+        record.engineVersion = params.MajorVersion ?? record.engineVersion;
         return ok({});
+      }
       case "ResetAccountPassword":
         return ok({});
       case "DeleteInstance":
@@ -301,20 +379,187 @@ export class ProtocolWorld {
         return this.destroyTair(params);
       case "CreateDBInstance":
         return this.createRds(params, fault);
+      case "CloneDBInstance": {
+        const source = this.rds.get(params.DBInstanceId ?? "");
+        if (!source)
+          return errorBody("InvalidDBInstanceName.NotFound", "absent");
+        return this.createRds(
+          {
+            ...params,
+            Engine: source.engine ?? "PostgreSQL",
+            EngineVersion: source.engineVersion ?? "16.0",
+            SecurityIPList: "127.0.0.1",
+            DBInstanceNetType: "Intranet",
+          },
+          fault,
+        );
+      }
       case "DescribeDBInstances":
         return this.describeRds(params);
       case "DescribeDBInstanceAttribute":
         return this.describeRdsAttribute(params);
-      case "DescribeDBInstanceSSL":
-        return ok({ SSLEnabled: "off" });
+      case "DescribeDBInstanceSSL": {
+        const record = this.rds.get(params.DBInstanceId ?? "");
+        if (!record)
+          return errorBody("InvalidDBInstanceName.NotFound", "absent");
+        if (record.sslReads > 0 && --record.sslReads === 0)
+          record.ssl.LastModifyStatus = this.rdsSslFailure
+            ? "failed"
+            : "success";
+        return ok(record.ssl);
+      }
+      case "ModifyDBInstanceSSL": {
+        const record = this.rds.get(params.DBInstanceId ?? "");
+        if (!record)
+          return errorBody("InvalidDBInstanceName.NotFound", "absent");
+        if (record.status !== "Running")
+          return errorBody("IncorrectDBInstanceState", "resize pending");
+        record.ssl = Object.fromEntries(
+          ["CAType", "ConnectionString", "TlsVersion", "ServerCert"].flatMap(
+            (key) => (params[key] === undefined ? [] : [[key, params[key]]]),
+          ),
+        );
+        record.ssl.SSLEnabled = params.SSLEnabled === "1" ? "on" : "off";
+        record.ssl.LastModifyStatus = "setting";
+        record.sslReads = 3;
+        return ok({});
+      }
+      case "DescribeBackupPolicy": {
+        const record = this.rds.get(params.DBInstanceId ?? "");
+        return record
+          ? ok(record.backupPolicy ?? {})
+          : errorBody("InvalidDBInstanceName.NotFound", "absent");
+      }
+      case "ModifyBackupPolicy": {
+        const record = this.rds.get(params.DBInstanceId ?? "");
+        if (!record)
+          return errorBody("InvalidDBInstanceName.NotFound", "absent");
+        record.backupPolicy = {
+          ...record.backupPolicy,
+          ...Object.fromEntries(
+            [
+              "PreferredBackupPeriod",
+              "PreferredBackupTime",
+              "EnableBackupLog",
+              "ReleasedKeepPolicy",
+              "BackupRetentionPeriod",
+              "LogBackupRetentionPeriod",
+            ].flatMap((key) =>
+              params[key] === undefined
+                ? []
+                : [
+                    [
+                      key,
+                      key.endsWith("RetentionPeriod")
+                        ? Number(params[key])
+                        : params[key],
+                    ],
+                  ],
+            ),
+          ),
+        };
+        return ok({});
+      }
+      case "DescribeParameters": {
+        const record = this.rds.get(params.DBInstanceId ?? "");
+        if (!record)
+          return errorBody("InvalidDBInstanceName.NotFound", "absent");
+        const parameters = (values: Record<string, string> = {}) => ({
+          DBInstanceParameter: Object.entries(values).map(
+            ([ParameterName, ParameterValue]) => ({
+              ParameterName,
+              ParameterValue,
+            }),
+          ),
+        });
+        return ok({
+          Engine: record.engine,
+          ConfigParameters: parameters(record.parameters),
+          RunningParameters: parameters(record.runningParameters),
+        });
+      }
+      case "ModifyParameter": {
+        const record = this.rds.get(params.DBInstanceId ?? "");
+        if (!record)
+          return errorBody("InvalidDBInstanceName.NotFound", "absent");
+        record.parameters = {
+          ...record.parameters,
+          ...JSON.parse(params.Parameters ?? "{}"),
+        };
+        if (params.Forcerestart === "true")
+          record.runningParameters = { ...record.parameters };
+        const configured = record.parameters;
+        if (
+          record.engine === "MySQL" &&
+          configured?.max_connections !== undefined
+        ) {
+          record.maxConnections = Number(configured.max_connections);
+          record.runningParameters = {
+            ...record.runningParameters,
+            max_connections: String(record.maxConnections + 520),
+          };
+          delete configured.max_connections;
+        }
+        return ok({});
+      }
+      case "ModifyDBInstanceMaintainTime": {
+        const record = this.rds.get(params.DBInstanceId ?? "");
+        if (!record)
+          return errorBody("InvalidDBInstanceName.NotFound", "absent");
+        record.maintainTime = params.MaintainTime;
+        return ok({});
+      }
+      case "ModifyDBInstanceSpec": {
+        const record = this.rds.get(params.DBInstanceId ?? "");
+        if (!record)
+          return errorBody("InvalidDBInstanceName.NotFound", "absent");
+        record.status = "Modifying";
+        record.describes = 0;
+        record.pendingSpec = () => {
+          record.instanceClass = params.DBInstanceClass ?? record.instanceClass;
+          record.compressionMode =
+            params.CompressionMode ?? record.compressionMode;
+          record.storage = Number(params.DBInstanceStorage ?? record.storage);
+          record.storageType =
+            params.DBInstanceStorageType ?? record.storageType;
+          if (params.ServerlessConfiguration !== undefined) {
+            const config = JSON.parse(params.ServerlessConfiguration);
+            record.serverless = {
+              ...record.serverless,
+              ...(config.MinCapacity !== undefined
+                ? { ScaleMin: config.MinCapacity }
+                : {}),
+              ...(config.MaxCapacity !== undefined
+                ? { ScaleMax: config.MaxCapacity }
+                : {}),
+              ...(config.AutoPause !== undefined
+                ? { AutoPause: config.AutoPause }
+                : {}),
+              ...(config.SwitchForce !== undefined
+                ? { SwitchForce: config.SwitchForce }
+                : {}),
+            };
+          }
+        };
+        return ok({});
+      }
+      case "ModifyDBInstanceDescription": {
+        const record = this.rds.get(params.DBInstanceId ?? "");
+        if (record) record.name = params.DBInstanceDescription!;
+        return ok({});
+      }
       case "DescribeDBInstanceNetInfo":
         return this.describeRdsNet(params);
       case "ListTagResources":
         return this.listTagResources(params);
       case "DeleteDBInstance":
         return this.deleteRds(params);
-      case "ModifyDBInstanceDeletionProtection":
+      case "ModifyDBInstanceDeletionProtection": {
+        const record = this.rds.get(params.DBInstanceId ?? "");
+        if (record)
+          record.deletionProtection = params.DeletionProtection === "true";
         return ok({});
+      }
       case "GetInstance":
         return ok({
           IsSuccess: true,
@@ -329,35 +574,76 @@ export class ProtocolWorld {
       case "DeleteInstanceVpcEndpointLinkedVpc":
         return this.deleteAcrLink(params);
       default:
-        return errorBody("InvalidAction", `Unsupported protocol action ${action}`);
+        return errorBody(
+          "InvalidAction",
+          `Unsupported protocol action ${action}`,
+        );
     }
   }
 
   dispatchRoa(
     method: string,
     pathname: string,
-    body: Record<string, unknown>,
+    input: RoaBody,
+    query: RpcParams = {},
+    action?: string,
   ): ProtocolResponse {
-    const createFault = this.consumeFault("CreateCluster");
-    if (method === "POST" && pathname === "/clusters") {
-      if (createFault && createFault.accept !== true) {
-        return {
-          statusCode: createFault.statusCode ?? 400,
+    const fault = action ? this.consumeFault(action) : undefined;
+    const faultResponse = fault
+      ? {
+          statusCode: fault.statusCode ?? 400,
           body: {
-            code: createFault.code,
-            message: createFault.code,
+            code: fault.code,
+            message: fault.code,
             request_id: requestId(),
           },
-        };
-      }
-      return this.createAck(body);
+        }
+      : undefined;
+    if (faultResponse && !fault?.accept) return faultResponse;
+    const child = this.roa.dispatch(method, pathname, input, query);
+    if (child) return faultResponse ?? child;
+    const body = Array.isArray(input) ? {} : input;
+    if (method === "POST" && pathname === "/clusters") {
+      const response = this.createAck(body);
+      return faultResponse ?? response;
+    }
+    if (method === "GET" && pathname === "/api/v1/clusters") {
+      const clusters = [...this.ack.values()].filter(
+        (c) =>
+          (!query.name || c.name === query.name) &&
+          (!query.region_id || query.region_id === this.regionId),
+      );
+      const page = Number(query.page_number ?? 1);
+      const size = Number(query.page_size ?? 50);
+      return ok({
+        clusters: clusters
+          .slice((page - 1) * size, page * size)
+          .map((c) => this.ackBody(c)),
+        page_info: {
+          page_number: page,
+          page_size: size,
+          total_count: clusters.length,
+        },
+      });
+    }
+    const upgradeMatch = pathname.match(
+      /^\/api\/v2\/clusters\/([^/]+)\/upgrade$/,
+    );
+    if (upgradeMatch && method === "POST") {
+      const cluster = this.ack.get(upgradeMatch[1]!);
+      if (!cluster)
+        return { statusCode: 404, body: { code: "ErrorClusterNotFound" } };
+      return this.roa.task(() => {
+        cluster.currentVersion = String(body.next_version);
+      });
     }
     const clusterMatch = pathname.match(/^\/clusters\/([^/]+)$/);
     if (clusterMatch && method === "GET") {
       return this.describeAck(clusterMatch[1]);
     }
-    if (clusterMatch && method === "PUT") {
-      return this.modifyAck(clusterMatch[1], body);
+    const modifyMatch = pathname.match(/^\/api\/v2\/clusters\/([^/]+)$/);
+    if (modifyMatch && method === "PUT") {
+      return this.modifyAck(modifyMatch[1]!, body);
     }
     if (clusterMatch && method === "DELETE") {
       return this.deleteAck(clusterMatch[1]);
@@ -379,8 +665,12 @@ export class ProtocolWorld {
       };
     }
     return {
-      statusCode: 404,
-      body: { code: "NotFound", message: pathname, request_id: requestId() },
+      statusCode: 400,
+      body: {
+        code: "UnsupportedProtocolRoute",
+        message: pathname,
+        request_id: requestId(),
+      },
     };
   }
 
@@ -425,7 +715,10 @@ export class ProtocolWorld {
           VRouterId: item.routerId,
           CreationTime: "2026-09-02T00:00:00Z",
           Tags: {
-            Tag: Object.entries(item.tags).map(([Key, Value]) => ({ Key, Value })),
+            Tag: Object.entries(item.tags).map(([Key, Value]) => ({
+              Key,
+              Value,
+            })),
           },
         })),
       },
@@ -498,7 +791,8 @@ export class ProtocolWorld {
 
   private describeVSwitchAttributes(params: RpcParams): ProtocolResponse {
     const vSwitchId = param(params, "VSwitchId");
-    const item = vSwitchId === undefined ? undefined : this.vswitches.get(vSwitchId);
+    const item =
+      vSwitchId === undefined ? undefined : this.vswitches.get(vSwitchId);
     if (item === undefined) return ok({});
     return ok({
       VSwitchId: item.vSwitchId,
@@ -517,11 +811,10 @@ export class ProtocolWorld {
 
   private deleteVSwitch(params: RpcParams): ProtocolResponse {
     const vSwitchId = param(params, "VSwitchId");
-    if (vSwitchId === undefined) return errorBody("MissingParameter", "VSwitchId");
+    if (vSwitchId === undefined)
+      return errorBody("MissingParameter", "VSwitchId");
     const liveTair = [...this.tair.values()].some(
-      (item) =>
-        item.vSwitchId === vSwitchId &&
-        item.status !== "Destroyed",
+      (item) => item.vSwitchId === vSwitchId && item.status !== "Destroyed",
     );
     const hold = this.kvstoreHolds.get(vSwitchId) ?? 0;
     if (liveTair || hold > 0) {
@@ -566,12 +859,20 @@ export class ProtocolWorld {
     );
   }
 
-  private createTair(params: RpcParams, fault?: ScriptedFault): ProtocolResponse {
+  private createTair(
+    params: RpcParams,
+    fault?: ScriptedFault,
+  ): ProtocolResponse {
     const token = param(params, "Token");
-    const existing = this.findTairByToken(token) ?? this.findTairByName(param(params, "InstanceName"));
+    const existing =
+      this.findTairByToken(token) ??
+      this.findTairByName(param(params, "InstanceName"));
     if (existing !== undefined && existing.status !== "Destroyed") {
       if (fault?.code === "CanNotAcquireLock") {
-        return errorBody("CanNotAcquireLock", "Can't acquire lock for this operation.");
+        return errorBody(
+          "CanNotAcquireLock",
+          "Can't acquire lock for this operation.",
+        );
       }
       return ok({
         InstanceId: existing.instanceId,
@@ -583,6 +884,9 @@ export class ProtocolWorld {
     const name = param(params, "InstanceName") ?? instanceId;
     const vSwitchId = param(params, "VSwitchId");
     const record: TairRecord = {
+      nodeType: param(params, "NodeType"),
+      instanceClass: param(params, "InstanceClass") ?? "redis.test",
+      engineVersion: param(params, "EngineVersion"),
       instanceId,
       name,
       status: "Creating",
@@ -604,7 +908,10 @@ export class ProtocolWorld {
       this.kvstoreHolds.set(vSwitchId, this.tairKvstoreHoldAfterDestroy);
     }
     if (fault?.code === "CanNotAcquireLock" && fault.accept !== false) {
-      return errorBody("CanNotAcquireLock", "Can't acquire lock for this operation.");
+      return errorBody(
+        "CanNotAcquireLock",
+        "Can't acquire lock for this operation.",
+      );
     }
     return ok({
       InstanceId: instanceId,
@@ -684,7 +991,8 @@ export class ProtocolWorld {
     fault?: ScriptedFault,
   ): ProtocolResponse {
     const instanceId = param(params, "InstanceId");
-    const record = instanceId === undefined ? undefined : this.tair.get(instanceId);
+    const record =
+      instanceId === undefined ? undefined : this.tair.get(instanceId);
     if (
       record !== undefined &&
       record.status !== "Released" &&
@@ -700,8 +1008,15 @@ export class ProtocolWorld {
         },
       };
     }
-    if (record === undefined || record.status === "Released" || record.status === "Destroyed") {
-      return { statusCode: 404, body: { Code: "InvalidInstanceId.NotFound", RequestId: requestId() } };
+    if (
+      record === undefined ||
+      record.status === "Released" ||
+      record.status === "Destroyed"
+    ) {
+      return {
+        statusCode: 404,
+        body: { Code: "InvalidInstanceId.NotFound", RequestId: requestId() },
+      };
     }
     this.promoteTair(record);
     const omitIdentity =
@@ -717,6 +1032,14 @@ export class ProtocolWorld {
             ...(omitIdentity
               ? {}
               : { InstanceId: record.instanceId, InstanceName: record.name }),
+            NodeType:
+              record.nodeType === "MASTER_SLAVE"
+                ? "double"
+                : record.nodeType === "STAND_ALONE"
+                  ? "single"
+                  : record.nodeType,
+            InstanceClass: record.instanceClass,
+            EngineVersion: record.engineVersion,
             InstanceStatus: record.status,
             VpcId: record.vpcId,
             VSwitchId: record.vSwitchId,
@@ -767,7 +1090,8 @@ export class ProtocolWorld {
         "The instance is not in a ready state for SSL modification.",
       );
     }
-    record.ssl = param(params, "SSLEnabled") === "Enable" ? "Enable" : "Disable";
+    record.ssl =
+      param(params, "SSLEnabled") === "Enable" ? "Enable" : "Disable";
     return ok({});
   }
 
@@ -812,7 +1136,8 @@ export class ProtocolWorld {
     const name = param(params, "InstanceName");
     if (name !== undefined) record.name = name;
     const protection = param(params, "InstanceReleaseProtection");
-    if (protection !== undefined) record.releaseProtection = protection === "true";
+    if (protection !== undefined)
+      record.releaseProtection = protection === "true";
     return ok({});
   }
 
@@ -844,7 +1169,8 @@ export class ProtocolWorld {
     const resourceId =
       param(params, "ResourceId.1") ?? param(params, "ResourceId");
     const rds = resourceId === undefined ? undefined : this.rds.get(resourceId);
-    const tair = resourceId === undefined ? undefined : this.tair.get(resourceId);
+    const tair =
+      resourceId === undefined ? undefined : this.tair.get(resourceId);
     const tags = rds?.tags ?? tair?.tags ?? {};
     return ok({
       TagResources: {
@@ -864,7 +1190,9 @@ export class ProtocolWorld {
       param(params, "ResourceId");
     const next = remove ? {} : tagsFrom(params);
     const removedKeys = Object.entries(params)
-      .filter(([key]) => /^TagKey\.\d+$/i.test(key) || /^TagKeys\.\d+$/i.test(key))
+      .filter(
+        ([key]) => /^TagKey\.\d+$/i.test(key) || /^TagKeys\.\d+$/i.test(key),
+      )
       .map(([, value]) => value);
     const apply = (tags: Record<string, string>) => {
       if (remove) {
@@ -888,10 +1216,16 @@ export class ProtocolWorld {
     return ok({});
   }
 
-  private createRds(params: RpcParams, fault?: ScriptedFault): ProtocolResponse {
+  private createRds(
+    params: RpcParams,
+    fault?: ScriptedFault,
+  ): ProtocolResponse {
     const clientToken = param(params, "ClientToken");
     const existing = [...this.rds.values()].find(
-      (item) => item.clientToken === clientToken || item.name === param(params, "DBInstanceDescription"),
+      (item) =>
+        clientToken !== undefined &&
+        item.clientToken === clientToken &&
+        item.regionId === (params.RegionId ?? this.regionId),
     );
     if (existing !== undefined) {
       return ok({ DBInstanceId: existing.instanceId });
@@ -899,6 +1233,16 @@ export class ProtocolWorld {
     const instanceId = this.nextId("rm-test");
     const vSwitchId = param(params, "VSwitchId") ?? param(params, "VSwitchIds");
     this.rds.set(instanceId, {
+      regionId: params.RegionId ?? this.regionId,
+      engine: param(params, "Engine") ?? "PostgreSQL",
+      engineVersion: params.EngineVersion,
+      instanceClass: params.DBInstanceClass ?? "pg.test",
+      storage: Number(params.DBInstanceStorage ?? 20),
+      storageType: params.DBInstanceStorageType,
+      category: params.Category,
+      deletionProtection: false,
+      ssl: { SSLEnabled: "off" },
+      sslReads: 0,
       instanceId,
       name: param(params, "DBInstanceDescription") ?? instanceId,
       status: "Creating",
@@ -909,32 +1253,55 @@ export class ProtocolWorld {
       describes: 0,
     });
     if (fault?.accept === true) {
-      return errorBody(fault.code, fault.code);
+      return {
+        ...errorBody(fault.code, fault.code),
+        statusCode: fault.statusCode ?? 400,
+      };
     }
     return ok({ DBInstanceId: instanceId });
   }
 
   private promoteRds(record: RdsRecord): void {
+    if (record.status === "Modifying") {
+      if (++record.describes >= 3) {
+        record.pendingSpec?.();
+        record.pendingSpec = undefined;
+        record.status = "Running";
+      }
+      return;
+    }
     if (record.status !== "Creating") return;
     record.describes += 1;
-    if (record.describes >= this.rdsDescribesUntilRunning) record.status = "Running";
+    if (record.describes >= this.rdsDescribesUntilRunning)
+      record.status = "Running";
   }
 
   private describeRds(params: RpcParams): ProtocolResponse {
     const search = param(params, "SearchKey");
     const items = [...this.rds.values()].filter(
-      (item) => item.status !== "Deleting" && (search === undefined || item.name === search),
+      (item) =>
+        item.status !== "Deleting" &&
+        (!params.RegionId || item.regionId === params.RegionId) &&
+        (!params.DBInstanceId || item.instanceId === params.DBInstanceId) &&
+        (search === undefined || item.name === search),
     );
+    const pageNumber = Number(params.PageNumber ?? 1);
+    const pageSize = Number(params.PageSize ?? 100);
     return ok({
+      TotalRecordCount: items.length,
+      PageNumber: pageNumber,
+      PageRecordCount: pageSize,
       Items: {
-        DBInstance: items.map((item) => {
-          this.promoteRds(item);
-          return {
-            DBInstanceId: item.instanceId,
-            DBInstanceDescription: item.name,
-            DBInstanceStatus: item.status,
-          };
-        }),
+        DBInstance: items
+          .slice((pageNumber - 1) * pageSize, pageNumber * pageSize)
+          .map((item) => {
+            this.promoteRds(item);
+            return {
+              DBInstanceId: item.instanceId,
+              DBInstanceDescription: item.name,
+              DBInstanceStatus: item.status,
+            };
+          }),
       },
     });
   }
@@ -942,19 +1309,36 @@ export class ProtocolWorld {
   private describeRdsAttribute(params: RpcParams): ProtocolResponse {
     const record = this.rds.get(param(params, "DBInstanceId") ?? "");
     if (record === undefined) {
-      return { statusCode: 404, body: { Code: "InvalidDBInstanceId.NotFound", RequestId: requestId() } };
+      return {
+        statusCode: 404,
+        body: {
+          Code: "InvalidDBInstanceName.NotFound",
+          RequestId: requestId(),
+        },
+      };
     }
     this.promoteRds(record);
     return ok({
       Items: {
         DBInstanceAttribute: [
           {
+            RegionId: record.regionId,
+            DBInstanceClass: record.instanceClass,
+            DBInstanceStorage: record.storage,
+            DBInstanceStorageType: record.storageType,
+            EngineVersion: record.engineVersion,
+            Category: record.category,
+            ServerlessConfig: record.serverless,
+            CompressionMode: record.compressionMode,
+            MaxConnections: record.maxConnections,
+            MaintainTime: record.maintainTime,
+            Engine: record.engine,
             DBInstanceId: record.instanceId,
             DBInstanceDescription: record.name,
             DBInstanceStatus: record.status,
             VpcId: record.vpcId,
             VSwitchId: record.vSwitchId,
-            DeletionProtection: false,
+            DeletionProtection: record.deletionProtection,
           },
         ],
       },
@@ -963,10 +1347,22 @@ export class ProtocolWorld {
 
   private describeRdsNet(params: RpcParams): ProtocolResponse {
     const record = this.rds.get(param(params, "DBInstanceId") ?? "");
-    if (record === undefined) return ok({ DBInstanceNetInfos: { DBInstanceNetInfo: [] } });
+    if (record === undefined)
+      return ok({ DBInstanceNetInfos: { DBInstanceNetInfo: [] } });
     return ok({
       DBInstanceNetInfos: {
         DBInstanceNetInfo: [
+          ...(this.rdsPublicEndpoint
+            ? [
+                {
+                  ConnectionString: `${record.instanceId}.public.rds.aliyuncs.com`,
+                  ConnectionStringType: "Normal",
+                  IPType: "Public",
+                  IPAddress: "192.0.2.1",
+                  Port: "5432",
+                },
+              ]
+            : []),
           {
             ConnectionString: `${record.instanceId}.pg.rds.aliyuncs.com`,
             ConnectionStringType: "Normal",
@@ -984,6 +1380,8 @@ export class ProtocolWorld {
     if (record === undefined) {
       return errorBody("InvalidDBInstanceId.NotFound", "Instance not found");
     }
+    if (record.deletionProtection)
+      return errorBody("DeletionProtection", "protected");
     if (record.status === "Creating") {
       return errorBody(
         "IncorrectDBInstanceState",
@@ -1019,13 +1417,17 @@ export class ProtocolWorld {
   private ackBody(cluster: AckRecord): Record<string, unknown> {
     return {
       cluster_id: cluster.clusterId,
+      cluster_spec: cluster.clusterSpec,
       name: cluster.name,
       state: cluster.state,
       vpc_id: cluster.vpcId,
       vswitch_id: cluster.vSwitchIds.join(","),
       current_version: cluster.currentVersion,
       deletion_protection: cluster.deletionProtection,
-      tags: Object.entries(cluster.tags).map(([key, value]) => ({ key, value })),
+      tags: Object.entries(cluster.tags).map(([key, value]) => ({
+        key,
+        value,
+      })),
     };
   }
 
@@ -1036,6 +1438,7 @@ export class ProtocolWorld {
       : [];
     this.ack.set(clusterId, {
       clusterId,
+      clusterSpec: String(body.cluster_spec),
       name: String(body.name ?? clusterId),
       state: "running",
       vpcId: typeof body.vpcid === "string" ? body.vpcid : undefined,
@@ -1079,13 +1482,16 @@ export class ProtocolWorld {
         body: { code: "ErrorClusterNotFound", request_id: requestId() },
       };
     }
-    if (typeof body.deletion_protection === "boolean") {
-      cluster.deletionProtection = body.deletion_protection;
-    }
-    return {
-      statusCode: 200,
-      body: { request_id: requestId(), task_id: this.nextId("T-test") },
-    };
+    return this.roa.task(() => {
+      // Live ACK accepts this request but selects the edition operation, ignoring
+      // deletion_protection even when cluster_spec is unchanged.
+      if (typeof body.cluster_spec === "string") {
+        cluster.clusterSpec = body.cluster_spec;
+        return;
+      }
+      if (typeof body.deletion_protection === "boolean")
+        cluster.deletionProtection = body.deletion_protection;
+    });
   }
 
   private tagAck(
@@ -1096,7 +1502,9 @@ export class ProtocolWorld {
       ? body.resource_ids.map(String)
       : [];
     const next = this.ackTags(body);
-    const removed = Array.isArray(body.tag_keys) ? body.tag_keys.map(String) : [];
+    const removed = Array.isArray(body.tag_keys)
+      ? body.tag_keys.map(String)
+      : [];
     for (const clusterId of ids) {
       const cluster = this.ack.get(clusterId);
       if (cluster === undefined) continue;
@@ -1117,6 +1525,8 @@ export class ProtocolWorld {
         body: { code: "ErrorClusterNotFound", request_id: requestId() },
       };
     }
+    if (cluster.deletionProtection)
+      return { statusCode: 400, body: { code: "DeletionProtection" } };
     for (const vSwitchId of cluster.vSwitchIds) {
       this.enis.push({
         id: this.nextId("eni-test"),
@@ -1140,7 +1550,9 @@ export class ProtocolWorld {
 
   private getAcrLinks(params: RpcParams): ProtocolResponse {
     const instanceId = param(params, "InstanceId");
-    const links = this.acrLinks.filter((item) => item.instanceId === instanceId);
+    const links = this.acrLinks.filter(
+      (item) => item.instanceId === instanceId,
+    );
     return ok({
       IsSuccess: true,
       Code: "success",
@@ -1179,3 +1591,5 @@ export class ProtocolWorld {
     return ok({ IsSuccess: true, Code: "success" });
   }
 }
+import { VpcConnectivity } from "./vpc-connectivity.ts";
+import { RamResources } from "./ram-resources.ts";

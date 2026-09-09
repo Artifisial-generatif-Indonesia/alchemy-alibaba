@@ -6,13 +6,16 @@ import * as Effect from "effect/Effect";
 import { AlibabaClients } from "../clients.ts";
 import {
   AlibabaInvariantError,
+  isIncorrectInstanceState,
   isNotFound,
+  isTransient,
   retryingSdkCall,
   sdkCall,
 } from "../error.ts";
 import {
   waitFor,
   waitForPresent,
+  waitUntilAccepted,
   type WaitOptions,
 } from "../internal/lifecycle.ts";
 import type { Providers } from "../providers.ts";
@@ -83,6 +86,21 @@ export const SecurityIpGroupProvider = (
     SecurityIpGroup,
     Effect.gen(function* () {
       const clients = yield* AlibabaClients;
+      // Child updates can overlap parent resize/password/configuration work.
+      // These mutations are idempotent; wait for Tair to release its state lock.
+      const requestMutation = <Result>(
+        operation: string,
+        call: () => Promise<Result>,
+      ) =>
+        waitUntilAccepted({
+          service: "Tair",
+          operation,
+          request: sdkCall("Tair", operation, call),
+          retryIf: (error) =>
+            isIncorrectInstanceState(error) || isTransient(error),
+          wait: options.wait,
+        });
+
       const get = (instanceId: string, name: string) =>
         retryingSdkCall("Tair", "DescribeSecurityIps", () =>
           clients.tair.describeSecurityIps(
@@ -136,7 +154,7 @@ export const SecurityIpGroupProvider = (
             (news.attribute !== undefined &&
               group.securityIpGroupAttribute !== news.attribute)
           ) {
-            yield* sdkCall("Tair", "ModifySecurityIps", () =>
+            yield* requestMutation("ModifySecurityIps", () =>
               clients.tair.modifySecurityIps(
                 new Tair.ModifySecurityIpsRequest({
                   instanceId: news.instanceId,
@@ -164,7 +182,7 @@ export const SecurityIpGroupProvider = (
           if (output.securityIps.length === 0) return;
           const deletingDefault = output.name === "default";
           const expected = deletingDefault ? DEFAULT_GROUP_FALLBACK_IPS : [];
-          yield* retryingSdkCall("Tair", "DeleteSecurityIps", () =>
+          yield* requestMutation("DeleteSecurityIps", () =>
             clients.tair.modifySecurityIps(
               new Tair.ModifySecurityIpsRequest({
                 instanceId: output.instanceId,

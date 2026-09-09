@@ -5,11 +5,13 @@ import * as Schema from "effect/Schema";
 import * as Predicate from "effect/Predicate";
 
 export const AlibabaService = Schema.Literals([
+  "ECS",
   "ACK",
   "ACR",
   "Tair",
   "RDS",
   "VPC",
+  "RAM",
 ]);
 
 export type AlibabaService = typeof AlibabaService.Type;
@@ -230,13 +232,30 @@ export const isRetryableObservation = (error: unknown): boolean =>
   (isTransient(error) || error.code === "SafeRetryBudgetExceeded");
 
 const absentResourceCodes: Record<AlibabaService, ReadonlySet<string>> = {
+  RAM: new Set([
+    "EntityNotExist.Role",
+    "EntityNotExist.Policy",
+    "EntityNotExist.PolicyVersion",
+  ]),
+  ECS: new Set([
+    "InvalidDiskId.NotFound",
+    "InvalidKeyPair.NotFound",
+    "InvalidInstanceId.NotFound",
+    "InvalidSecurityGroupId.NotFound",
+    "InvalidSecurityGroupRuleId.NotFound",
+  ]),
   VPC: new Set([
+    "InvalidAllocationId.NotFound",
+    "InvalidNatGatewayId.NotFound",
+    "InvalidSnatEntryId.NotFound",
+    "InvalidSnatTableId.NotFound",
     "InvalidVpcId.NotFound",
     "InvalidVSwitchId.NotFound",
     "InvalidVswitchId.NotFound",
   ]),
   RDS: new Set([
     "InvalidDBInstanceId.NotFound",
+    "InvalidDBInstanceName.NotFound",
     "InvalidDBName.NotFound",
     "InvalidAccountName.NotFound",
     "InvalidAccount.NotFound",
@@ -252,6 +271,7 @@ const absentResourceCodes: Record<AlibabaService, ReadonlySet<string>> = {
     "NotFound",
     "Cluster.NotFound",
     "ErrorClusterNotFound",
+    "ErrorNodePoolNotFound",
     "NodePool.NotFound",
     "Nodepool.NotFound",
     "Addon.NotFound",

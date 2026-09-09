@@ -1,6 +1,12 @@
 # Alibaba Cloud providers for Alchemy v2
 
-Reusable VPC, ACK, ACR, RDS and Tair resources using the official Alibaba SDKs and Effect. This is an independent community provider, not an official Alibaba or Alchemy package.
+Reusable ECS, VPC, ACK, ACR, RDS, Tair, RAM and Kubernetes resources using the official Alibaba SDKs and Effect. This is an independent community provider, not an official Alibaba or Alchemy package.
+
+**Release:** `0.2.0` is prepared for npm's `latest` channel. Read the
+[release notes](CHANGELOG.md) and [validation limits](#validation-limits) before
+adoption. This release includes the review fixes and new resources described in
+[COMPOSITION.md](COMPOSITION.md), and intentionally breaks the 0.1.0 input API.
+Publishing instructions are in [RELEASE.md](RELEASE.md).
 
 The implementation follows Alchemy's unified lifecycle: read live state,
 adopt only according to each API's ownership capabilities, reconcile from the
@@ -31,29 +37,38 @@ is not treated as proof that Alibaba has detached its hidden vSwitch relation.
 
 | Service | Resource            | Supported lifecycle and features                                                                                                                                                                             |
 | ------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| ECS | `Instance` | One pay-as-you-go VM, system disk, cloud-init, private/optional public IP, metadata/protection/expiry updates, graceful teardown |
+| ECS | `SecurityGroup` | Tagged normal VPC security group, description and tag updates, dependency-aware deletion |
+| ECS | `SecurityGroupIngress` | One IPv4/IPv6/security-group inbound rule, accept/drop, paginated observation and deletion by rule ID |
+| ECS | `SecurityGroupEgress`, `KeyPair`, `Disk`, `DiskAttachment` | Outbound rules, public-key import, independent growable data disks and retained attachments |
+| VPC | `Eip`, `EipAssociation`, `NatGateway`, `SnatEntry` | Explicit outbound ownership, bandwidth/IP updates, dependency-aware replacement and deletion |
+| RAM | `Role`, `Policy`, `RolePolicyAttachment` | Tagged roles/custom policies, version rotation and scoped permissions; ACK RRSA helpers |
+| Kubernetes | `Secret` | Redacted inputs over upstream Manifest lifecycle; ACK adapter supports upstream workloads |
+| ACR | `Image` | Upstream Docker builds/pushes with temporary ACR credentials and registry-observed digest outputs |
 | VPC     | `Network`           | create/read/update/delete, complete create/modify request inputs, deterministic naming, ownership tags, tag drift, idempotency tokens, readiness and deletion waits                                          |
 | VPC     | `VSwitch`           | create/read/update/delete, complete create/modify request inputs, immutable network/zone/CIDR identity, ownership tags, tag drift, idempotency tokens, readiness and deletion waits                          |
-| ACK     | `ManagedCluster`    | create/read/update/upgrade/delete, full create/modify/upgrade/delete request inputs, deterministic naming, ownership tags, tag drift, deletion protection, retained-resource delete options, readiness waits |
-| ACK     | `NodePool`          | create/read/update/delete, full create/modify/delete request inputs, scaling-group ownership tags, stable name lookup, readiness waits                                                                       |
+| ACK     | `ManagedCluster`    | create/read/update/upgrade/delete, desired cluster settings and upgrade/deletion policies, deterministic naming, ownership tags, tag drift, deletion protection, retained-resource delete options, readiness waits |
+| ACK     | `NodePool`          | create/read/update/delete, desired pool settings, in-place scaling/image changes, scaling-group ownership tags, stable name lookup, readiness waits                                                                       |
 | ACK     | `Addon`             | install/read/configure/upgrade/uninstall, version and config drift, cleanup options                                                                                                                          |
 | ACR     | `InstanceReference` | read/retain an existing paid Enterprise registry instance; excluded from nuke because the ACR API exposes no purchase/delete lifecycle                                                                       |
 | ACR     | `Namespace`         | create/read/update/delete, auto-create and default repository configuration                                                                                                                                  |
 | ACR     | `Repository`        | create/read/update/delete, visibility, metadata, and immutable-tag settings                                                                                                                                  |
 | ACR     | `EndpointAclEntry`  | create/read/update/delete Internet registry or chart ACL entries                                                                                                                                             |
 | ACR     | `VpcEndpointLink`   | create/read/delete Registry or Chart VPC/vSwitch links, optional PrivateZone record, readiness waits                                                                                                         |
-| Tair    | `Instance`          | create/read/resize/delete, full create/spec/delete request inputs, redacted default-account password rotation, SSL, VPC authentication mode, release protection, ownership tags, tag drift, readiness waits  |
+| Tair    | `Instance`          | create/read/resize/delete, desired instance settings and deletion options, redacted default-account password rotation, SSL, VPC authentication mode, release protection, ownership tags, tag drift, readiness waits  |
 | Tair    | `Account`           | create/read/update/delete, redacted password rotation, description, type and privilege creation settings                                                                                                     |
 | Tair    | `SecurityIpGroup`   | read/cover/delete named whitelist entries and attributes                                                                                                                                                     |
-| RDS     | `Instance`          | create/read/resize/delete, full create/spec/delete request inputs, private normal endpoint/IP discovery, SSL and certificate controls, deletion protection, ownership tags, tag drift, readiness waits       |
+| RDS     | `Instance`          | create/read/resize/delete, desired inputs, supported resize fields, backup/parameters/maintenance, restore to a new instance, private normal endpoint/IP discovery, SSL and certificate controls, deletion protection, ownership tags, tag drift, readiness waits       |
 | RDS     | `Database`          | create/read/update/delete, charset, description, and full create request extras                                                                                                                              |
 | RDS     | `Account`           | create/read/update/delete, redacted password rotation, account type, policy and description                                                                                                                  |
-| RDS     | `AccountPrivilege`  | observe/grant/change/revoke per-database privileges                                                                                                                                                          |
+| RDS     | `AccountPrivilege`  | observe/grant/change privileges; PostgreSQL revoke unsupported (see LIVE-VALIDATION.md)                                                                                                                                                          |
 | RDS     | `SecurityIpGroup`   | read/cover/reset named IP arrays, enhanced whitelist settings                                                                                                                                                |
 
 The generated Alibaba SDK models are converted to plain structural input types
-by `ModelInput<T>`. This keeps the complete request surface available as the
-SDK grows without requiring callers to instantiate Darabonba model classes or
-maintaining a second copy of every request field. Because generated model
+by `ModelInput<T>`. Callers do not instantiate Darabonba model classes.
+Desired ACK/RDS inputs route internally to create or update operations, with
+no public request-phase bags or compatibility aliases. Supported RDS resize fields are
+explicitly narrowed to settings with reconciliation support. Because generated model
 properties remain optional even when Alibaba documents them as required, the
 provider resource types additionally encode unconditional required inputs.
 See [SPEC-COVERAGE.md](./SPEC-COVERAGE.md) and
@@ -66,9 +81,9 @@ implemented lifecycle, protocol tests, and connected merge bar.
 chain. The provider itself reads only configuration through Effect:
 
 - `ALIBABA_CLOUD_REGION` is required;
-- `ALIBABA_CLOUD_VPC_ENDPOINT`, `ALIBABA_CLOUD_ACK_ENDPOINT`,
+- `ALIBABA_CLOUD_ECS_ENDPOINT`, `ALIBABA_CLOUD_VPC_ENDPOINT`, `ALIBABA_CLOUD_ACK_ENDPOINT`,
   `ALIBABA_CLOUD_ACR_ENDPOINT`, `ALIBABA_CLOUD_TAIR_ENDPOINT`, and
-  `ALIBABA_CLOUD_RDS_ENDPOINT` are optional;
+  `ALIBABA_CLOUD_RDS_ENDPOINT`, and `ALIBABA_CLOUD_RAM_ENDPOINT` are optional;
 - access keys, STS, OIDC/RAM roles, ECS roles, CLI profiles, and URI credentials
   remain the responsibility of `@alicloud/credentials`.
 
@@ -108,19 +123,21 @@ export default Alchemy.Stack(
 );
 ```
 
-Secrets accepted by Tair and RDS account resources, and private SSL key
-material, use `Redacted.Redacted<string>`. Create them with
+Secrets accepted by Tair and RDS account resources, ACK bootstrap credentials
+and user data (including nested fields), Kubernetes Secrets, and private SSL key
+material use `Redacted.Redacted<string>`. Create them with
 `Redacted.make(value)` instead of passing plain strings.
 
 ## Adoption and deletion semantics
 
-VPC networks/vSwitches, ACK clusters/node pools, and Tair/RDS instances carry
+ECS instances/security groups, VPC networks/vSwitches, ACK clusters/node pools,
+and Tair/RDS instances carry
 `alchemy::stack`, `alchemy::stage`, and `alchemy::id` ownership tags. A matching
 physical resource without those tags is reported as unowned, so Alchemy's
 normal `adopt` policy decides whether takeover is allowed.
 
 ACK addons, ACR namespaces/repositories, Tair/RDS accounts, databases,
-privileges, and whitelist groups do not expose safe ownership metadata. They
+privileges, ECS ingress rules, and whitelist groups do not expose safe ownership metadata. They
 are silently adoptable by their compound cloud identity, matching Alchemy's
 policy for APIs without ownership primitives.
 
@@ -129,9 +146,8 @@ to retain at least one address, so destroying an `RDS.SecurityIpGroup` resets it
 to `127.0.0.1` by default; set `resetTo` when another safe baseline is needed.
 
 An ordinary `destroy` is planned from persisted state, so losing a resource's
-state row leaves nothing for that destroy to tear down. The six tagged resources
-(VPC network/vSwitch, ACK cluster/node pool, RDS instance, Tair instance)
-therefore implement `list` — the one observation path that needs no state, and
+state row leaves nothing for that destroy to tear down. Tagged resources with account-wide inventory
+implement `list` as documented in SUPPORT-MATRIX.md — the one observation path that needs no state, and
 so the only way to find an orphan whose state row is gone.
 
 Account-wide `list` enumerates all resources of a type in the configured region,
@@ -159,16 +175,19 @@ fixtures. The advertised resource matrix is in
 [SUPPORT-MATRIX.md](./SUPPORT-MATRIX.md).
 
 
-## Install and compatibility
+## Install and runtime requirements
 
-The initial release is installable directly from GitHub; pin a full commit in
-application lockfiles. It is not yet published to the npm registry. Replace `REVIEWED_COMMIT_SHA`
-below with the commit containing these fixes; the existing `v0.1.0` tag uses
-the older dependency pins. Set the root overrides below before installing.
+The prepared npm release is `0.2.0`. Once it is published to `latest`,
+install the exact version below. Set the root overrides in the next section
+**before installing**, then commit the application's lockfile.
 
 ```sh
-npx --yes npm@11.19.1 install alchemy-alibaba@github:Artifisial-generatif-Indonesia/alchemy-alibaba#REVIEWED_COMMIT_SHA alchemy@2.0.0-beta.76 effect@4.0.0-rc.112
+npx --yes npm@11.19.1 install --save-exact alchemy-alibaba@0.2.0 alchemy@2.0.0-beta.76 effect@4.0.0-rc.112
 ```
+
+Until publication, install the locally prepared tarball or pin a reviewed full
+GitHub commit. The existing `v0.1.0` Git tag predates these fixes and peer pins.
+The `latest` channel may advance; the exact version above makes adoption explicit.
 
 Development and CI use Node 22.22.1 and npm 11.19.1. Node 22.12.0 or newer
 is required by the updated Alchemy browser tooling. Use npm 11.19.1 for both
@@ -210,7 +229,23 @@ See [examples/rds.alchemy.ts](examples/rds.alchemy.ts) for a configurable RDS st
 
 ## Validation limits
 
-Local lifecycle and protocol tests are not proof of a complete live cloud
-lifecycle. RDS and several child resources still require connected validation
-in an isolated account/stage before production adoption. The support matrix
-records these gaps. This extraction does not perform a cloud deployment.
+Local lifecycle and protocol tests do not establish every live cloud behavior.
+The disposable PostgreSQL/VPC/vSwitch run passed provisioning, updates, TLS SQL,
+and final active-resource cleanup, with manual intervention for unsupported
+PostgreSQL ownership revocation. `AccountPrivilege` is not a fully reversible
+PostgreSQL permission manager. RDS permanent recycle-bin removal remains unverified.
+
+ACK/ACR lack complete live lifecycle validation; Tair evidence remains partial.
+Review the [support matrix](SUPPORT-MATRIX.md) and [live evidence](LIVE-VALIDATION.md)
+for the intended configuration before production adoption. Installation performs
+no cloud deployment.
+
+## Disposable ECS environments
+
+See [ECS.md](ECS.md) for the supported VM lifecycle, networking, disk retention,
+and [the private RDS/Tair access example](examples/ecs.alchemy.ts). ECS has local
+SDK protocol coverage and disposable live SSH, resize, disk-retention and
+cleanup evidence; private database connectivity remains unverified. Custom
+`AlibabaClientSet` implementations need both `ecs` and `ram` SDK clients.
+See [COMPOSITION.md](COMPOSITION.md) for Kubernetes, explicit networking, RRSA, images
+and database operation settings. No automatic 0.1.0 state migration is provided.

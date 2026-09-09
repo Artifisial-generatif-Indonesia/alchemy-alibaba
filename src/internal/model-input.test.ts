@@ -2,7 +2,6 @@ import { expect, it } from "vitest";
 import type { InstanceProps as RdsProps } from "../rds/instance.ts";
 import type { InstanceProps as TairProps } from "../tair/instance.ts";
 import type { ModelInput } from "./model-input.ts";
-
 it("preserves SDK field types, excludes secrets, and retains actual dictionary inputs", () => {
   // These assertions are checked by tsc as well as the runtime suite.
   // @ts-expect-error Storage is numeric.

@@ -23,6 +23,8 @@ The exact versions pinned by this repository are:
 
 | Service | Package | Version |
 | --- | --- | --- |
+| RAM | `@alicloud/ram20150501` | `1.3.0` |
+| ECS | `@alicloud/ecs20140526` | `7.11.2` |
 | VPC | `@alicloud/vpc20160428` | `7.2.5` |
 | ACK | `@alicloud/cs20151215` | `7.2.0` |
 | ACR | `@alicloud/cr20181201` | `2.2.3` |
@@ -33,7 +35,9 @@ Generated properties are optional even when their documentation says
 "required." The provider therefore encodes unconditional required inputs in
 its own resource types and supplies the configured provider region when the
 request omits `regionId`. Conditional product rules remain available through
-the full generated request surface and must be validated by Alibaba.
+the supported generated request fields and must be validated by Alibaba.
+RDS resize inputs are narrowed to fields with observed convergence; deferred
+changes are rejected. See COMPOSITION.md for the desired-state contract without 0.1.0 aliases.
 
 ## Lifecycle coverage
 
@@ -60,7 +64,7 @@ convergence without credentials or cloud spend.
 | `RDS.Instance` | create, describe/list, describe network endpoints, resize, describe/modify SSL, protect, tag/untag, delete | Alchemy tags | create/read private endpoint/resize/SSL/protect/tag/delete | Required |
 | `RDS.Database` | create, describe, modify description, delete | compound identity | create/update/delete | Required |
 | `RDS.Account` | create, describe, modify description, reset password, delete | compound identity | create/update/rotate/delete | Required |
-| `RDS.AccountPrivilege` | describe, grant/change, revoke | compound identity | grant/change/revoke | Required |
+| `RDS.AccountPrivilege` | describe, grant/change, revoke | compound identity | grant/change; PostgreSQL revoke fails explicitly | Partial; see LIVE-VALIDATION.md |
 | `RDS.SecurityIpGroup` | describe, cover/reset | compound identity | create/update/reset | Required |
 | `Tair.Instance` | create, describe/list/overview, resize, rotate the built-in account login value, describe/modify SSL, modify VPC login mode, protect, tag/untag, delete, recycle-bin destroy | Alchemy tags | create/rotate/resize/SSL/VPC-mode/protect/tag/delete/destroy; protocol+stack | Required |
 | `Tair.Account` | create, describe, modify description, reset password, delete | compound identity | create/update/rotate/delete | Required |
@@ -144,7 +148,8 @@ checks in `src/internal/model-input.test.ts` cover the audited failures:
   before SSL changes, and applies certificate and redacted key/password
   rotations. Secret inputs without SSL settings fail explicitly.
 - New generated RDS/Tair account names use letters and digits. RDS names fit
-  the conservative 16-character engine limit. Explicit and persisted names
+  the conservative 16-character engine limit; Tair uses a live-tested
+  32-character generated name. Explicit and persisted names
   remain authoritative and are never silently renamed.
 - SDK model index signatures are removed from request inputs while genuine
   dictionaries remain typed. Excluded raw secret fields cannot bypass the
@@ -182,3 +187,45 @@ normal reads does not prove its recycle-bin data or backups are gone.
 The [live validation runbook](./LIVE-VALIDATION.md) records the remaining
 approval inputs and acceptance checks. No connected cloud operations were run
 for this audit remediation.
+
+
+## Protocol coverage completion
+
+The [support matrix](SUPPORT-MATRIX.md#protocol-regression-coverage) maps the new
+loopback tests for RDS/Tair children, ACR children, and ACK node pools/addons to
+their lifecycle and failure assertions. Real SDK serialization now exercises
+ACK array bodies and snake_case fields, ACR JSON-encoded nested parameters,
+RDS versus Tair response envelopes, accepted-create recovery, and persisted
+teardown after errors. RDS/Tair instance update tests cover resize tokens,
+serverless settings, SSL/key changes, and deletion protection.
+
+This work found and fixed an additional provider issue: PostgreSQL SSL settings
+can match the request while `LastModifyStatus` is still `setting` or becomes
+`failed`. Reconciliation now waits for `success` when this status is returned,
+and reports failure without copying the service's potentially sensitive reason.
+Engines that omit this PostgreSQL-only status retain their field-based readiness
+checks. The pinned SDK documents these statuses in
+`DescribeDbinstanceSslresponseBody.ts`.
+
+No connected operations are needed for these protocol tests.
+
+## ECS scope
+
+See [ECS.md](ECS.md) for the constrained standalone VM and security-group API
+contract and the additional protocol tests in `src/protocol/ecs.test.ts`. ECS
+request construction is explicit: raw SDK extras cannot enable batch purchases,
+subscriptions, inherited passwords, extra disks or independent public IPs.
+The permission-enabled live run covered standalone create, SSH/bootstrap,
+VM size/group/protection changes, attached-disk expansion with data retained,
+no-op and independently verified cleanup. Minute-precision auto-release
+comparison and concurrent attached-disk resize retries have regression coverage.
+Interrupted create recovery required VM replacement; see LIVE-VALIDATION.md.
+
+## 0.2.0 review additions
+
+The additional lifecycle contracts and local evidence for ACK credentials,
+Kubernetes Secrets, EIP/NAT/SNAT, RAM/RRSA, ACR images, RDS backup/parameters/restore
+and independent ECS disks/keys/rules are recorded in SUPPORT-MATRIX.md and
+COMPOSITION.md. These additions have no connected acceptance evidence. Their SDK
+models define wire serialization; loopback tests cannot establish regional
+availability, account permissions, billing, backup validity or guest readiness.
