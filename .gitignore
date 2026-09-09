@@ -5,3 +5,7 @@ dist/
 .alchemy/
 coverage/
 artifacts/
+# pnpm may create these stores locally on Windows.
+/global/v11/
+/package-manager-store/
+/.pnpm-store/

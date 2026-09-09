@@ -28,7 +28,8 @@ function run(mode = "success", args = []) {
     engines: { node: requirement },
     publishConfig: { registry: "https://registry.npmjs.org/", access: "public", tag: "latest" },
   }));
-  writeFileSync(path.join(root, ".gitignore"), "artifacts/\ncalls.jsonl\n");
+  writeFileSync(path.join(root, ".gitignore"),
+    readFileSync(new URL("../.gitignore", import.meta.url), "utf8") + "\ncalls.jsonl\n");
   writeFileSync(path.join(root, "fake-pnpm.cjs"), `
     const fs = require("node:fs"), crypto = require("node:crypto");
     const args = process.argv.slice(2), mode = process.env.RELEASE_TEST_MODE;
@@ -39,6 +40,13 @@ function run(mode = "success", args = []) {
       console.log("test-publisher");
     } else if (args[0] === "install") {
       if (mode === "install-failure") process.exit(1);
+      if (mode === "local-stores") {
+        for (const directory of ["global/v11", "package-manager-store/v11/files/00", ".pnpm-store/v11"]) {
+          fs.mkdirSync(directory, { recursive: true });
+          fs.writeFileSync(directory + "/generated", "pnpm generated data");
+        }
+      }
+      if (mode === "tracked-change") fs.appendFileSync("package.json", "\\n");
     } else if (args[0] === "run") {
       if (mode === "checks-failure") process.exit(1);
       const out = "artifacts/0.2.0/", tarball = "alchemy-alibaba-0.2.0.tgz";
@@ -89,7 +97,13 @@ test("dry run validates without authentication or registry publication", () => {
   expect(result.calls.at(-1)).toContain("--dry-run");
 });
 
-test.each(["dirty", "auth-failure", "install-failure", "checks-failure", "tampered"])("%s prevents publication", mode => {
+test("local pnpm stores created during installation do not block publication", () => {
+  const result = run("local-stores");
+  expect(result.status, result.stderr).toBe(0);
+  expect(result.calls.filter(args => args[0] === "publish")).toHaveLength(1);
+});
+
+test.each(["dirty", "tracked-change", "auth-failure", "install-failure", "checks-failure", "tampered"])("%s prevents publication", mode => {
   const result = run(mode);
   expect(result.status).not.toBe(0);
   expect(result.calls.some(args => args[0] === "publish")).toBe(false);
