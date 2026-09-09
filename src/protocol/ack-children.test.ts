@@ -30,6 +30,48 @@ const poolCreate = {
   },
 };
 describe("ACK child ROA protocol", { timeout: 30000 }, () => {
+  it("separates edition and protection updates, repairs protection drift, and leaves unchanged clusters alone", async () => {
+    await withTempDir((directory) =>
+      withProtocolHarness(async ({ server, world }) => {
+        const options = protocolMakeOptions(server.host, directory);
+        const stack = (upgraded: boolean) =>
+          protocolStack(
+            "AckClusterConfigCategories",
+            options,
+            Effect.gen(function* () {
+              const cluster = yield* ACK.ManagedCluster("cluster", {
+                ...clusterProps,
+                clusterSpec: upgraded ? "ack.pro.small" : "ack.standard",
+                deletionProtection: !upgraded,
+              });
+              return { id: cluster.clusterId };
+            }),
+          );
+        const initial = await deployProtocol(options, stack(false));
+        const modifications = () =>
+          world.captured.filter(
+            (r) =>
+              r.method === "PUT" &&
+              r.pathname === `/api/v2/clusters/${initial.id}`,
+          );
+        expect(modifications()).toHaveLength(0);
+        expect(await deployProtocol(options, stack(true))).toEqual(initial);
+        expect(modifications()).toHaveLength(2);
+        expect(world.ack.get(initial.id)).toMatchObject({
+          clusterSpec: "ack.pro.small",
+          deletionProtection: false,
+        });
+        await deployProtocol(options, stack(true));
+        expect(modifications()).toHaveLength(2);
+        world.ack.get(initial.id)!.deletionProtection = true;
+        await deployProtocol(options, stack(true));
+        expect(modifications()).toHaveLength(3);
+        expect(world.ack.get(initial.id)?.deletionProtection).toBe(false);
+        await destroyProtocol(options, stack(true));
+        expect(world.ack.size).toBe(0);
+      }),
+    );
+  });
   it("persists node pools and addons, changes image/config/version, and deletes children before the cluster", async () => {
     await withTempDir((directory) =>
       withProtocolHarness(async ({ server, world }) => {

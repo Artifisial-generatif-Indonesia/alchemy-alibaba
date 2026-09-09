@@ -1454,8 +1454,12 @@ export class ProtocolWorld {
       };
     }
     return this.roa.task(() => {
-      if (typeof body.cluster_spec === "string")
+      // Live ACK accepts this request but selects the edition operation, ignoring
+      // deletion_protection even when cluster_spec is unchanged.
+      if (typeof body.cluster_spec === "string") {
         cluster.clusterSpec = body.cluster_spec;
+        return;
+      }
       if (typeof body.deletion_protection === "boolean")
         cluster.deletionProtection = body.deletion_protection;
     });

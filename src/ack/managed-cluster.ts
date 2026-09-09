@@ -274,6 +274,16 @@ const modifyMatches = (
     ACK.DescribeClusterDetailResponseBody,
   );
 
+// Live ACK ignored deletionProtection in a successful request that also sent
+// an unchanged clusterSpec. Keep edition and configuration mutations separate.
+const modifyCategories = <T extends { readonly clusterSpec?: string }>({
+  clusterSpec,
+  ...configuration
+}: T) => [
+  { clusterSpec },
+  configuration,
+];
+
 export interface ManagedClusterProviderOptions {
   readonly wait?: WaitOptions;
 }
@@ -596,27 +606,40 @@ export const ManagedClusterProvider = (
             "ACK returned a cluster without clusterId",
           );
 
-          if (
-            news.modify !== undefined &&
-            ((olds !== undefined
-              ? !isDeepStrictEqual(news.modify, olds.modify)
-              : Object.entries(news.modify).some(
-                  ([key, value]) =>
-                    value !== undefined &&
-                    !(key in ACK.CreateClusterRequest.types()),
-                )) ||
-              !modifyMatches(cluster, modify))
-          ) {
+          const categories = modifyCategories(modify);
+          const desiredCategories = modifyCategories(news.modify);
+          const oldCategories =
+            olds === undefined ? undefined : modifyCategories(olds.modify);
+          for (const [index, request] of categories.entries()) {
+            const changed =
+              oldCategories !== undefined
+                ? !isDeepStrictEqual(
+                    desiredCategories[index],
+                    oldCategories[index],
+                  )
+                : Object.entries(request).some(
+                    ([key, value]) =>
+                      value !== undefined &&
+                      !(key in ACK.CreateClusterRequest.types()),
+                  );
+            if (!changed && modifyMatches(cluster, request)) continue;
             const response = yield* sdkCall("ACK", "ModifyCluster", () =>
               clients.ack.modifyCluster(
                 clusterId,
-                new ACK.ModifyClusterRequest(modify),
+                new ACK.ModifyClusterRequest(request),
               ),
             );
             yield* waitForTask({
               client: clients.ack,
               operation: "ModifyCluster",
               taskId: response.body?.taskId,
+              wait: options.wait,
+            });
+            cluster = yield* waitForPresent({
+              service: "ACK",
+              operation: "ModifyCluster",
+              read: getById(clusterId),
+              ready: (value) => ready(value) && modifyMatches(value, request),
               wait: options.wait,
             });
           }
