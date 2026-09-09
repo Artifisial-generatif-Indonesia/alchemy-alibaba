@@ -2,10 +2,12 @@
 
 Status: disposable PostgreSQL/VPC/vSwitch and ACK smoke runs executed on
 2026-09-09 (Jakarta), including a PostgreSQL rerun of candidate `9c68310`.
-See the evidence and limitations below. The live Kubernetes Secret test was
-blocked by missing SLB ACL permissions. Later non-ACR loops covered MySQL and
-Tair and found additional lifecycle bugs; ECS and NAT creation were permission
-blocked. MySQL was subsequently excluded from further tests by the user.
+See the evidence and limitations below. The initial Kubernetes Secret attempt
+was blocked by SLB ACL permissions; the permission-enabled follow-up passed
+live TLS connection and Secret lifecycle checks. Later non-ACR loops covered MySQL and
+Tair and found additional lifecycle bugs. A permission-enabled rerun subsequently
+verified ECS and NAT lifecycle behavior and fixed ECS timestamp/resize defects.
+MySQL was subsequently excluded from further tests by the user.
 Other unlisted scenarios remain unverified.
 This runbook does not authorize cloud access, purchases, or data deletion.
 
@@ -482,3 +484,134 @@ After the run, update this evidence and the support matrix with the candidate
 commit, actual outcomes, interventions, residual resources, and billing follow-up.
 A normal `0.2.0` version does not turn an untested optional feature into a verified
 one. Release only the scope the recorded results support.
+
+## Permission-enabled ECS and NAT rerun (2026-09-09)
+
+After the test identity's ECS, NAT, SLB and RAM-read policies were updated,
+new isolated stages reran the blocked scenarios. RAM inventory also independently
+confirmed that the worker role from the earlier ACK smoke had been removed.
+ACR and further MySQL tests remained excluded.
+
+### ECS
+
+The stage created an imported SSH public key, two security groups, a runner-only
+SSH rule, VPC/vSwitch, pay-as-you-go VM, independent ESSD data disk, EIP and both
+attachments. SSH used a pinned host key. The guest bootstrap marker and a
+synthetic data-disk write/read passed.
+
+Two provider defects were reproduced and fixed:
+
+- ECS accepts seconds in `AutoReleaseTime` but returns minute precision. Exact
+  string comparison left a running VM waiting for the original
+  timestamp until the wait bound. Compare at minute precision in diff, mutation and readiness checks.
+  The protocol simulator now returns the live representation; creation, no-op
+  and schedule clearing are covered locally.
+- Online disk expansion returned `OperationDenied` while concurrent VM resizing
+  restarted its attached instance. Retrying after the VM returned to Running
+  succeeded. A bounded, operation-local retry now handles that conflict and the
+  explicit instance-state codes. Permanent failures retain their original error;
+  permission denials are not retried. The local test exercises busy responses,
+  denial and saved-state recovery. A live concurrent resize then passed in
+  **38.59 seconds**, including actual state-conflict retries.
+
+Live readbacks verified VM resize from 2 vCPU/4 GiB to 4 vCPU/8 GiB and back,
+security-group membership changes, deletion protection on/off, descriptions,
+tags, EIP bandwidth and data-disk expansion from 20 to 30, 40 and 50 GiB.
+The final concurrency check returned to 4 vCPU/8 GiB. VM, disk and EIP IDs stayed
+stable through these completed updates, and the guest data survived each resize.
+Fresh-process unchanged applies took about four seconds and produced only no-ops.
+
+Recovery limitation: the initial timestamp wait was interrupted after 209 seconds.
+Alchemy's saved creating state still lacked resolved subnet/key references, so
+resuming planned a delete-first VM replacement. It completed in 47 seconds;
+this is **not** evidence of same-VM recovery from that interrupted create.
+Both VM generations and all associated disks were tracked for cleanup.
+No state files were edited to complete recovery or teardown.
+
+Ordinary Alchemy destroy took **56.07 seconds**. Independent inventory checks
+verified both tracked VMs, all three tracked disks (two system disks and the
+independent data disk), EIP, key pair, groups, ENIs, vSwitch and VPC absent,
+and the resource state empty. This run did not test private database access,
+IPv6 traffic, guest filesystem expansion, or automatic expiry actually firing.
+
+### NAT
+
+The six-resource VPC/vSwitch/NAT/EIP/association/SNAT graph deployed in
+**78.84 seconds**. Independent API readbacks verified the available NAT and
+SNAT entry, EIP association, metadata/tags and bandwidth. Metadata, SNAT name
+and bandwidth updates passed in **6.35 seconds**, preserving NAT, EIP and SNAT
+IDs. Unchanged applies produced six no-ops.
+
+Ordinary destroy took **66.37 seconds**. Independent inventory found no stage
+NAT, EIP or VPC remaining. This is control-plane lifecycle evidence; outbound
+traffic through SNAT was not tested.
+
+The current ECS quotes remained USD 0.084028/hour and USD 0.158028/hour for the
+two VM sizes including their system disk, excluding data disk and networking.
+Private records reserved USD 1 each for this ECS and NAT rerun and USD 5 for the
+ACK follow-up. Combined with earlier conservative allowances, that is USD
+29.1828 of the approved USD 30 budget; these are allowances, not verified bills.
+
+### ACK Kubernetes connection and Secret
+
+A new one-worker ACK Pro cluster deployed in **304.98 seconds**. The private
+adapter again fetched temporary credentials on both connections and verified
+that each certificate matched its private key. The test then created an SLB
+whitelist for the runner IPv4 /32 and the disposable cluster's internal ranges
+before enabling public access.
+
+`apiServerEip: true` alone was rejected with `InvalidParameter.ApiServerEipId`.
+The harness was corrected to declare a separate `VPC.Eip` and supply its
+allocation ID through `apiServerEipId`. That update passed in **128.86 seconds**.
+Independent readback verified that the EIP was attached to the load balancer
+whose API listener still had the expected whitelist enabled. No provider
+change was needed for this missing harness input.
+
+Live Kubernetes HTTPS then verified:
+
+- Server certificate validation and client-certificate authentication through
+  the provider's upstream Alchemy adapter, using temporary 30-minute credentials.
+- Kubernetes v1.36.2-aliyun.1 and one Ready worker.
+- Namespace and Secret creation through Alchemy in **4.28 seconds**; a direct
+  Kubernetes API read matched the synthetic Secret value and label.
+- Seven-resource no-op in **4.03 seconds**.
+- Secret rotation plus stage metadata updates in **15.93 seconds**; independent
+  API reads matched the new value, preserved the Secret UID, and showed a changed
+  resource version. A subsequent apply produced seven no-ops in **4.17 seconds**.
+- Secret and Namespace deletion in **4.25 seconds**, followed by a live Secret
+  read returning HTTP 404 while the cluster remained accessible.
+- Neither original nor rotated secret values, their base64 representations,
+  nor private keys appeared in the checked logs. Secret attributes were also
+  checked for secret data; cluster/pool attributes contained no credentials.
+
+The test used existing provider code for kubeconfig, Kubernetes Manifest and
+Secret; no changes to those implementations were required. The disposable node
+pool explicitly configured `delete: { force: true }`, after the test workload
+was removed. ACK nevertheless started a node-drain task. Live Kubernetes
+inspection identified the blocker: `coredns-pdb` allowed zero disruptions while
+only one Ready worker remained. The test-only CoreDNS and CSI provisioner
+budgets were deleted with UID preconditions after verifying that the cluster
+matched the disposable stage, the pool was already deleting, and no application
+pods remained. This is an explicit cleanup intervention, not automatic provider
+behavior or proof that force deletion bypasses disruption budgets. Production
+availability budgets must remain under the application's control.
+
+
+After the disruption budgets were removed, ACK reported the node-removal task
+successful. The next deletion read returned `ErrorNodePoolNotFound`, revealing
+an omitted ACK absence code. Adding that explicit code to the service-scoped
+absence set let the unchanged saved-state destroy finish the pool step and
+continue to the cluster. The ACK protocol simulator now emits this live error
+for a missing pool, exercising the existing persisted lifecycle tests. Generic
+HTTP 404s and authorization failures still do not prove resource absence.
+
+
+The resumed destroy completed in **287.44 seconds**. Independent reads verified
+cluster, node pool, scaling group, worker, disk, ENIs, VPC/vSwitch, worker RAM
+role, managed NAT/EIPs/security group/load balancer, and the separately managed
+API EIP absent; local resource state was empty. The separately journaled SLB ACL
+was then deleted and independently verified absent. Final redaction checks
+passed across 12 log files. Total cluster deploy start to cloud/state cleanup
+verification was about **21.6 minutes**, including endpoint setup,
+Secret tests, diagnosis, local fixes and cleanup. No active resources from this
+permission-enabled ECS/NAT/ACK round remain. Final billing is still unverified.

@@ -215,7 +215,11 @@ See [ECS.md](ECS.md) for the constrained standalone VM and security-group API
 contract and the additional protocol tests in `src/protocol/ecs.test.ts`. ECS
 request construction is explicit: raw SDK extras cannot enable batch purchases,
 subscriptions, inherited passwords, extra disks or independent public IPs.
-ECS live validation remains pending.
+The permission-enabled live run covered standalone create, SSH/bootstrap,
+VM size/group/protection changes, attached-disk expansion with data retained,
+no-op and independently verified cleanup. Minute-precision auto-release
+comparison and concurrent attached-disk resize retries have regression coverage.
+Interrupted create recovery required VM replacement; see LIVE-VALIDATION.md.
 
 ## 0.2.0 review additions
 

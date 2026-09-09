@@ -17,7 +17,11 @@ The known PostgreSQL ownership cleanup intervention remains necessary. See
 [candidate rerun evidence](./LIVE-VALIDATION.md#020-candidate-rerun-2026-09-09-jakarta);
 Later ACK and non-ACR loops are recorded separately in the same evidence.
 The latter found recovery, Tair request/name, and MySQL parameter-observation
-bugs. ECS and NAT creation remained blocked by test-profile permissions.
+bugs. A later permission-enabled ECS/NAT rerun passed lifecycle checks and
+verified cleanup, finding two additional ECS defects that were fixed. The ACK
+Secret follow-up passed and exposed an additional pool-absence code during
+cleanup; this is now recognized. Final-node disruption budgets required an
+explicit test-only cleanup intervention.
 
 Bindings: Consumers pass typed attributes (`vpcId`, `vSwitchId`,
 `instanceId`, kubeconfig/env outputs). No Alchemy `Binding` types are
@@ -39,7 +43,7 @@ registered. Do not add them speculatively.
 | RDS instance | Database / accounts / privileges / IP group | `instanceId` | Persisted lifecycle + blocked PostgreSQL revoke | PostgreSQL DBOwner revoke unsupported; MySQL grant/change/revoke and child deletion passed |
 | Tair instance | Account / IP group | `instanceId` | RPC child lifecycle, including busy-parent retries | Redis 7 create/update/delete and overlapping updates passed |
 | Tair instance | SSL / VPC auth / eviction | same resource mutations | Protocol + stack | Current Redis 7 API readback passed; client TLS/authentication not tested |
-| Provider outputs | env / kubeconfig | attributes, not bindings | n/a | ACK temporary private credentials and refresh verified; live Kubernetes API blocked |
+| Provider outputs | env / kubeconfig | attributes, not bindings | n/a | ACK temporary credentials and fetch-on-connect verified; live Kubernetes mTLS and Secret lifecycle passed |
 
 ## Resource matrix
 
@@ -50,7 +54,7 @@ implemented or not verified; **—** not applicable.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `VPC.Network` | Y | Y | Y (name/description) | Y if create identity changes | Y | `DeleteVpc` after bounded dependency wait (NAT/EIP/security-group/ENI stragglers) | Alchemy tags; unowned without them | `ClientToken` from Alchemy instance id | Observe by name; tokenized retry | DescribeVpcs pages | N | Pending (configuring), Available, Deleting | Persisted redeploy | Y | — | Subclass + protocol + stack | PostgreSQL, MySQL, ACK and current Tair smoke create/update/delete passed | No extra optional VPC features (IPv6, DNS, route tables) |
 | `VPC.VSwitch` | Y | Y | Y (name/description) | Y if vpc/zone/cidr change | Y | `DeleteVSwitch` after bounded ENI/Kvstore/RDS wait | Alchemy tags | `ClientToken` | Concurrent create is transient (`IncorrectVSwitchStatus`) | Describe by VPC/name | N | Pending/Available | Persisted redeploy | Y | — | Subclass + protocol + stack | PostgreSQL, MySQL, ACK and current Tair smoke passed; delayed service attachment release observed | Waiter is a safety net, not a substitute for Tair recycle-bin absence |
-| `ACK.ManagedCluster` | Y | Y | Modify/upgrade | Y if create identity changes | Y | `DeleteCluster` + task wait; ENIs can remain | Alchemy tags | None; observe by name | Accepted-create error recovered by v1 name inventory | `DescribeClustersV1`, region-scoped + paged | N | creating/running/deleting via task | Persisted redeploy/recovery | Y | kubeconfig not stored | Subclass + protocol + stack | Partial: ACK smoke: create, no-op, protection updates/drift, tags; see LIVE-VALIDATION.md | Upgrades/advanced policies unverified; Kubernetes API/Secret blocked by runner ACL permissions |
+| `ACK.ManagedCluster` | Y | Y | Modify/upgrade | Y if create identity changes | Y | `DeleteCluster` + task wait; ENIs can remain | Alchemy tags | None; observe by name | Accepted-create error recovered by v1 name inventory | `DescribeClustersV1`, region-scoped + paged | N | creating/running/deleting via task | Persisted redeploy/recovery | Y | kubeconfig not stored | Subclass + protocol + stack | Partial: ACK smoke: create, no-op, protection updates/drift, tags; see LIVE-VALIDATION.md | Upgrades/advanced policies unverified; follow-up Kubernetes HTTPS/Secret lifecycle passed |
 | `ACK.NodePool` | Y | Y | Y | scaling-group identity | Y | Delete + task wait | Scaling-group Alchemy tags | None | N | Name lookup within the cluster | N | Task wait | Persisted redeploy/recovery | Y | — | Subclass + protocol + stack | Partial: ACK smoke: create, no-op, scaling 1 → 2 → 1; see LIVE-VALIDATION.md | Final-node drain incomplete; cleanup required cluster-level deletion; live image/advanced rollout unverified |
 | `ACK.Addon` | Y (install) | Y | Configure/upgrade | Compound identity | Y (uninstall) | Uninstall + task | Compound identity; silent adopt | None | N | Cluster/name | N | Task wait | Persisted redeploy | — | Config JSON | Subclass + protocol + stack | Not connected | Canary policies and component-specific configuration unverified |
 | `ACR.InstanceReference` | N (retained) | Y | N | N | No-op; nuke skip | Never deletes the paid instance | Retained reference | — | — | Get by id | N | RUNNING | Subclass + protocol read | Observed | — | Subclass + protocol | Read-only plan smoke | Purchase/delete is out of scope |
@@ -180,9 +184,9 @@ Adding `Binding` types would be speculative.
 
 | Resource | Supported behavior | Local evidence | Live |
 | --- | --- | --- | --- |
-| `ECS.Instance` | One PostPaid VM; create/read, metadata/tags/protection/expiry updates, restart stopped VM, replacement for immutable settings, graceful stop/delete | Pinned SDK loopback with persisted Alchemy state, failures and recovery | Blocked by parent ECS create permissions; no VM created |
-| `ECS.SecurityGroup` | Normal VPC group; create/read, description/tags, replacement, bounded dependency-aware delete | SDK loopback and persisted lifecycle | CreateSecurityGroup denied; partial-state cleanup fixed and verified |
-| `ECS.SecurityGroupIngress` | One adoptable IPv4 inbound allow tuple; create/read, replace, delete by observed rule ID | SDK loopback, permission pagination, preservation of unrelated rule ownership | Pending |
+| `ECS.Instance` | One PostPaid VM; create/read, metadata/tags/protection/expiry updates, restart stopped VM, replacement for immutable settings, graceful stop/delete | Pinned SDK loopback with persisted Alchemy state, failures and recovery | Passed create, SSH/bootstrap, size/group/protection/tag updates, no-op and destroy; interrupted create required replacement |
+| `ECS.SecurityGroup` | Normal VPC group; create/read, description/tags, replacement, bounded dependency-aware delete | SDK loopback and persisted lifecycle | Passed create/update/delete and attached-VM cleanup |
+| `ECS.SecurityGroupIngress` | One adoptable IPv4 inbound allow tuple; create/read, replace, delete by observed rule ID | SDK loopback, permission pagination, preservation of unrelated rule ownership | Runner-only SSH rule create/connect/delete passed |
 
 Instances depend on security groups and VPC/vSwitches. RDS/Tair named IP groups
 can depend on `Instance.privateIp` using `Output.interpolate`, ordering access
@@ -197,15 +201,15 @@ additions below. Cloud-init completion remains outside infrastructure readiness.
 
 | Capability | Implemented behavior | Local evidence | Connected evidence |
 | --- | --- | --- | --- |
-| ACK connection/kubeconfig | Temporary redacted kubeconfig; serializable connection, private/public endpoint; upstream Kubernetes adapter with token or mTLS | `kubernetes/integration.test.ts` SDK fake + loopback HTTPS | Temporary private kubeconfig and adapter credential refresh verified; live HTTPS blocked |
-| Kubernetes Secret | Redacted UTF-8 data, base64 at apply, sanitized diagnostics; delegates upstream Manifest | Local HTTPS create/read/rotation/delete + error echo regression | Blocked by runner SLB ACL permission; no live Secret operations |
+| ACK connection/kubeconfig | Temporary redacted kubeconfig; serializable connection, private/public endpoint; upstream Kubernetes adapter with token or mTLS | `kubernetes/integration.test.ts` SDK fake + loopback HTTPS | Temporary private credentials and fetch-on-connect verified; public adapter mTLS and server certificate verification passed |
+| Kubernetes Secret | Redacted UTF-8 data, base64 at apply, sanitized diagnostics; delegates upstream Manifest | Local HTTPS create/read/rotation/delete + error echo regression | Passed live create/read, rotation preserving UID, no-op, deletion/404 and log/attribute redaction checks |
 | Desired resource inputs | Flat desired fields without 0.1.0 aliases, mutable changes in place, explicit-name replacement guard, authoritative saved IDs, ambiguous-name rejection | `protocol/review-regressions.test.ts`, ACK lifecycle tests, secret-input test | PostgreSQL rerun and ACK smoke cover the recorded desired-state transitions |
-| VPC EIP/NAT/SNAT | Tagged EIP/NAT, association and source-switch SNAT, bandwidth/tag drift; replacement preserves one final graph | `protocol/connectivity.test.ts` persisted stack with actual SDK wire | EIP create/delete passed; NAT create denied; partial graph cleaned up |
+| VPC EIP/NAT/SNAT | Tagged EIP/NAT, association and source-switch SNAT, bandwidth/tag drift; replacement preserves one final graph | `protocol/connectivity.test.ts` persisted stack with actual SDK wire | Passed NAT/EIP/SNAT create/update/no-op/delete; independent cleanup verified; outbound SNAT traffic untested |
 | RAM Role/Policy/Attachment + RRSA | Scoped OIDC trust, role policy, custom default policy versions, version-limit rotation, drift repair, ordered delete | `protocol/ram.test.ts` persisted stack with RAM wire format | None |
 | ACR Image | Upstream Docker build/push, temporary credentials, registry-observed digest; remote tags retained | `acr/image.test.ts` fake Docker and SDK | None |
 | RDS backup/parameters/maintenance/restore | Instance-owned configuration, pending-restart reporting, separate clone target | `protocol/instance-updates.test.ts` persisted state, actual SDK requests | MySQL parameters/backup schedule/maintenance passed; restore not run |
-| ECS mutable size/groups + full rules | Graceful resize, join before leave; IPv4/IPv6/group ingress and egress | `protocol/ecs.test.ts` | None |
-| ECS KeyPair/Disk/Attachment | Public-key import, independent growable disk, retain across VM replacement | `protocol/ecs.test.ts` persisted replacement/reattachment | ImportKeyPair/CreateDisk denied; no disk attachment attempted |
+| ECS mutable size/groups + full rules | Graceful resize, join before leave; IPv4/IPv6/group ingress and egress | `protocol/ecs.test.ts` | VM resize and group membership passed; full IPv6/egress live coverage pending |
+| ECS KeyPair/Disk/Attachment | Public-key import, independent growable disk, retain across VM replacement | `protocol/ecs.test.ts` persisted replacement/reattachment | Passed key import, attach, 20→50 GiB growth with data retained, and cleanup |
 
 New account-wide enumeration is implemented for EIP, NAT, disk, key pair and
 RAM role. RAM policy and relationship resources return no account-wide items.

@@ -244,7 +244,8 @@ no cloud deployment.
 
 See [ECS.md](ECS.md) for the supported VM lifecycle, networking, disk retention,
 and [the private RDS/Tair access example](examples/ecs.alchemy.ts). ECS has local
-SDK protocol coverage; its live acceptance run is still pending. Custom
+SDK protocol coverage and disposable live SSH, resize, disk-retention and
+cleanup evidence; private database connectivity remains unverified. Custom
 `AlibabaClientSet` implementations need both `ecs` and `ram` SDK clients.
 See [COMPOSITION.md](COMPOSITION.md) for Kubernetes, explicit networking, RRSA, images
 and database operation settings. No automatic 0.1.0 state migration is provided.

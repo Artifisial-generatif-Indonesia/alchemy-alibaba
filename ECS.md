@@ -108,10 +108,14 @@ outside that stage. Review the exact plan, pricing, runner CIDR and expiry first
 
 Local tests exercise the pinned SDK against loopback HTTP, including saved-state
 create/update/destroy, tokens, failure recovery, private allowlist dependencies,
-protection, and rule pagination. No ECS live test has been run. The connected
-acceptance run must additionally verify cloud-init/app readiness, real TLS SQL
-and Tair connections, old-IP access removal after replacement, automatic expiry,
-and independent disk/public-IP/security-group cleanup and billing.
+protection, and rule pagination. The disposable live run verified SSH with a
+pinned host key, bootstrap, VM resizing, group/protection changes, attached-disk
+growth with data retained, no-op, and independent compute/network/disk cleanup.
+It fixed minute-precision auto-release comparison and concurrent disk-resize
+state conflicts. Interrupted create recovery required VM replacement; see
+[the live evidence](LIVE-VALIDATION.md) for details. Real TLS SQL/Tair access,
+old-IP access removal after replacement, automatic expiry actually firing,
+application readiness and final billing remain unverified.
 
 References: [RunInstances](https://www.alibabacloud.com/help/en/ecs/developer-reference/api-ecs-2014-05-26-runinstances),
 [DeleteInstance](https://www.alibabacloud.com/help/en/ecs/developer-reference/api-ecs-2014-05-26-deleteinstance),
