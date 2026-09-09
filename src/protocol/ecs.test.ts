@@ -22,6 +22,55 @@ const base = {
 };
 
 describe("ECS real SDK lifecycle", { timeout: 30_000 }, () => {
+  it("retries attached-disk resize state conflicts but preserves permission failures", async () => {
+    await withTempDir((directory) =>
+      withProtocolHarness(async ({ server, world }) => {
+        const options = protocolMakeOptions(server.host, directory);
+        const stack = (size: number) =>
+          protocolStack(
+            "EcsDiskResizeContention",
+            options,
+            Effect.gen(function* () {
+              const vm = yield* ECS.Instance("vm", base);
+              const disk = yield* ECS.Disk("data", {
+                zoneId: "ap-southeast-5a",
+                size,
+              });
+              yield* ECS.DiskAttachment("mount", {
+                diskId: disk.diskId,
+                instanceId: vm.instanceId,
+              });
+              return { diskId: disk.diskId, instanceId: vm.instanceId };
+            }),
+          );
+        const first = await deployProtocol(options, stack(20));
+        world.script({
+          action: "ResizeDisk",
+          code: "OperationDenied",
+          statusCode: 403,
+        });
+        world.script({
+          action: "ResizeDisk",
+          code: "IncorrectInstanceStatus",
+          statusCode: 403,
+        });
+        expect(await deployProtocol(options, stack(30))).toEqual(first);
+        expect(world.ecs.disks.get(first.diskId)?.Size).toBe(30);
+        world.script({
+          action: "ResizeDisk",
+          code: "Forbidden.RAM",
+          statusCode: 403,
+        });
+        await expect(deployProtocol(options, stack(40))).rejects.toThrow();
+        expect(world.ecs.disks.get(first.diskId)?.Size).toBe(30);
+        expect(await deployProtocol(options, stack(40))).toEqual(first);
+        expect(world.ecs.disks.get(first.diskId)?.Size).toBe(40);
+        await destroyProtocol(options, stack(40));
+        expect(world.ecs.disks.size + world.ecs.instances.size).toBe(0);
+      }),
+    );
+  });
+
   it("destroys a partial deployment when denied parents leave child identities unresolved", async () => {
     await withTempDir((directory) =>
       withProtocolHarness(async ({ server, world }) => {
@@ -247,7 +296,7 @@ describe("ECS real SDK lifecycle", { timeout: 30_000 }, () => {
                 internetMaxBandwidthOut: 1,
                 description: `revision-${revision}`,
                 deletionProtection: false,
-                autoReleaseTime: revision ? "" : "2030-01-01T00:00:00Z",
+                autoReleaseTime: revision ? "" : "2030-01-01T00:00:06Z",
                 tags: revision ? { revision: "1" } : { remove: "yes" },
               });
               yield* RDS.SecurityIpGroup("rds-access", {
@@ -272,6 +321,14 @@ describe("ECS real SDK lifecycle", { timeout: 30_000 }, () => {
           privateIp: "10.40.1.10",
           publicIp: "192.0.2.10",
         });
+        expect(world.ecs.instances.get(first.instanceId)?.AutoReleaseTime).toBe(
+          "2030-01-01T00:00Z",
+        );
+        expect(
+          world.ecs.requests.filter(
+            (r) => r.action === "ModifyInstanceAutoReleaseTime",
+          ),
+        ).toHaveLength(0);
         const mutations = () =>
           world.ecs.requests.filter((r) => !r.action.startsWith("Describe"));
         const count = mutations().length;

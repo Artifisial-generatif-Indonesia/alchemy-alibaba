@@ -221,7 +221,7 @@ export class EcsResources {
           SecurityGroupIds: { SecurityGroupId: values(p, "SecurityGroupIds") },
           Description: p.Description,
           DeletionProtection: p.DeletionProtection === "true",
-          AutoReleaseTime: p.AutoReleaseTime,
+          AutoReleaseTime: p.AutoReleaseTime?.replace(/:\d{2}Z$/, "Z"),
         });
         this.tokens.set(p.ClientToken!, id);
         return ok({ InstanceIdSets: { InstanceIdSet: [id] } });
@@ -307,7 +307,8 @@ export class EcsResources {
         return ok();
       case "ModifyInstanceAutoReleaseTime":
         if (!instance) return error("InvalidInstanceId.NotFound");
-        instance.AutoReleaseTime = p.AutoReleaseTime ?? "";
+        instance.AutoReleaseTime =
+          p.AutoReleaseTime?.replace(/:\d{2}Z$/, "Z") ?? "";
         return ok();
       case "CreateSecurityGroup": {
         const id =

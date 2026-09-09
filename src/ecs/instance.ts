@@ -46,7 +46,7 @@ export interface InstanceProps {
   readonly internetMaxBandwidthOut?: number;
   readonly description?: string;
   readonly deletionProtection?: boolean;
-  /** Absolute UTC timestamp accepted by ECS. Empty string clears an existing schedule. */
+  /** Absolute UTC timestamp; ECS stores minute precision. Empty string clears the schedule. */
   readonly autoReleaseTime?: string;
   readonly tags?: Readonly<Record<string, string>>;
 }
@@ -79,6 +79,12 @@ export const Instance = Resource<Instance>("Alibaba.ECS.Instance");
 type Observed = ECS.DescribeInstancesResponseBodyInstancesInstance;
 const absent = missing("InvalidInstanceId.NotFound");
 const sorted = (ids: readonly string[]) => [...ids].sort();
+// ECS accepts seconds on writes but returns AutoReleaseTime as yyyy-MM-ddTHH:mmZ.
+const releaseMinute = (value: string | undefined) =>
+  (value ?? "").replace(
+    /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}):\d{2}(?:\.\d+)?Z$/,
+    "$1Z",
+  );
 const identity = (props: InstanceProps) => ({
   name: props.name,
   imageId: props.imageId,
@@ -243,7 +249,8 @@ export const InstanceProvider = (
             (news.deletionProtection !== undefined &&
               observed.deletionProtection !== news.deletionProtection) ||
             (news.autoReleaseTime !== undefined &&
-              (observed.autoReleaseTime ?? "") !== news.autoReleaseTime)
+              releaseMinute(observed.autoReleaseTime) !==
+                releaseMinute(news.autoReleaseTime))
           )
             return { action: "update" } as const;
           return undefined;
@@ -482,7 +489,8 @@ export const InstanceProvider = (
           }
           if (
             news.autoReleaseTime !== undefined &&
-            (value.autoReleaseTime ?? "") !== news.autoReleaseTime
+            releaseMinute(value.autoReleaseTime) !==
+              releaseMinute(news.autoReleaseTime)
           )
             yield* retryingSdkCall("ECS", "ModifyInstanceAutoReleaseTime", () =>
               clients.ecs.modifyInstanceAutoReleaseTime(
@@ -519,7 +527,8 @@ export const InstanceProvider = (
                 (news.deletionProtection === undefined ||
                   value.deletionProtection === news.deletionProtection) &&
                 (news.autoReleaseTime === undefined ||
-                  (value.autoReleaseTime ?? "") === news.autoReleaseTime) &&
+                  releaseMinute(value.autoReleaseTime) ===
+                    releaseMinute(news.autoReleaseTime)) &&
                 tagsEqual(tagRecord(value.tags?.tag), tags),
               wait: options.wait,
             }),

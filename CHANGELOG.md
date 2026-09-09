@@ -8,6 +8,11 @@ not claimed.
 
 ### Changes
 
+- Compare ECS auto-release timestamps at Alibaba's minute precision, avoiding
+  false drift and readiness timeouts when the input includes seconds. Retry
+  attached-disk expansion while a concurrent VM resize restarts the instance;
+  retries are bounded and permission denials remain fatal.
+
 - Reconcile MySQL `max_connections` against the instance's user limit, excluding
   Alibaba's reserved management connections from the comparison. Retry delayed
   `DependencyViolation.Rds` subnet release within the existing cleanup budget.

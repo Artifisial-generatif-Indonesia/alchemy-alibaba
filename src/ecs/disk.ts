@@ -9,8 +9,11 @@ import { isDeepStrictEqual } from "node:util";
 import { AlibabaClients, type AlibabaClientSet } from "../clients.ts";
 import {
   AlibabaInvariantError,
+  isIncorrectInstanceState,
   isNotFound,
+  isTransient,
   retryingSdkCall,
+  sdkCall,
 } from "../error.ts";
 import {
   replacement,
@@ -27,6 +30,7 @@ import {
   userTags,
   waitForAbsent,
   waitForPresent,
+  waitUntilAccepted,
   type WaitOptions,
 } from "../internal/lifecycle.ts";
 import type { Providers } from "../providers.ts";
@@ -240,15 +244,30 @@ export const DiskProvider = (options: { readonly wait?: WaitOptions } = {}) =>
               message: "ECS data disks cannot shrink",
             });
           if (v.size !== news.size)
-            yield* retryingSdkCall("ECS", "ResizeDisk", () =>
-              clients.ecs.resizeDisk(
-                new ECS.ResizeDiskRequest({
-                  diskId,
-                  newSize: news.size,
-                  type: v.status === "In_use" ? "online" : "offline",
-                }),
+            yield* waitUntilAccepted({
+              service: "ECS",
+              operation: "ResizeDisk",
+              request: sdkCall("ECS", "ResizeDisk", () =>
+                clients.ecs.resizeDisk(
+                  new ECS.ResizeDiskRequest({
+                    diskId,
+                    newSize: news.size,
+                    type: v.status === "In_use" ? "online" : "offline",
+                  }),
+                ),
               ),
-            );
+              // A concurrent VM resize restarts the attached instance. ECS
+              // reports this state conflict as OperationDenied, not always
+              // IncorrectInstanceStatus. Keep this retry local and bounded;
+              // an unsupported operation still surfaces its original error.
+              retryIf: (error) =>
+                isTransient(error) ||
+                isIncorrectInstanceState(error) ||
+                error.code === "InvalidStatus.Upgrading" ||
+                error.code === "InvalidInstanceStatus.NotRunning" ||
+                (error.code === "OperationDenied" && !!v.instanceId),
+              wait: options.wait,
+            });
           if (
             v.diskName !== name ||
             (news.description !== undefined &&
