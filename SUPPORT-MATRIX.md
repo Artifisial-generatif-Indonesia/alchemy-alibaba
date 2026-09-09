@@ -26,18 +26,18 @@ registered. Do not add them speculatively.
 | Parent | Child | Graph mechanism | Protocol | Live |
 | --- | --- | --- | --- | --- |
 | VPC Network | vSwitch | `vpcId` attribute | Yes | PostgreSQL smoke passed; older Tair leftovers tracked separately |
-| vSwitch | ACK cluster | `vswitchIds` | Create/delete + ENI hold | Not connected |
+| vSwitch | ACK cluster | `vswitchIds` | Create/delete + ENI hold | ACK smoke; see LIVE-VALIDATION.md |
 | vSwitch | RDS instance | `vSwitchId` | Create/delete + ENI hold | PostgreSQL smoke: release and delayed ENI cleanup verified |
 | vSwitch | Tair instance | `vSwitchId` | Yes, including delayed `DependencyViolation.Kvstore` | Partial: Tair purged; vSwitch/VPC still held |
 | vSwitch | ACR VPC endpoint | `vswitchId` | Yes | Not connected |
 | ACK cluster | Addon | `clusterId` | Install/configure/upgrade/uninstall + task waits | Not connected |
-| ACK cluster | Node pool | `clusterId` | Create/image update/delete + failed task recovery | Not connected |
+| ACK cluster | Node pool | `clusterId` | Create/image update/delete + failed task recovery | ACK smoke: scaling and stable identities; image update not run |
 | ACR instance | Namespace / repository | `instanceId` | Persisted lifecycle + failure envelope | Read-only smoke for instance reference |
 | ACR instance | VPC endpoint | `instanceId` + VPC/vSwitch | Yes | Not connected |
 | RDS instance | Database / accounts / privileges / IP group | `instanceId` | Persisted lifecycle + blocked PostgreSQL revoke | Partial: PostgreSQL smoke; grant revocation unsupported |
 | Tair instance | Account / IP group | `instanceId` | RPC child lifecycle (parent ID supplied) | Not connected |
 | Tair instance | SSL / VPC auth / eviction | same resource mutations | Protocol + stack | Failed on first configure deploy |
-| Provider outputs | env / kubeconfig | attributes, not bindings | n/a | Not connected |
+| Provider outputs | env / kubeconfig | attributes, not bindings | n/a | ACK temporary private credentials and refresh verified; live Kubernetes API blocked |
 
 ## Resource matrix
 
@@ -46,10 +46,10 @@ implemented or not verified; **—** not applicable.
 
 | Resource | Create | Read | Update | Replace | Delete | Permanent destroy | Adopt / ownership | Idempotency token | Ambiguous create recovery | Pagination / name lookup | Partial responses | Transitional states | Restart / recovery | Tags | Secrets | Tests | Live | Known gaps |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `VPC.Network` | Y | Y | Y (name/description) | Y if create identity changes | Y | `DeleteVpc` after bounded dependency wait (NAT/EIP/security-group/ENI stragglers) | Alchemy tags; unowned without them | `ClientToken` from Alchemy instance id | Observe by name; tokenized retry | DescribeVpcs pages | N | Pending (configuring), Available, Deleting | Persisted redeploy | Y | — | Subclass + protocol + stack | PostgreSQL smoke create/update/delete passed | No extra optional VPC features (IPv6, DNS, route tables) |
-| `VPC.VSwitch` | Y | Y | Y (name/description) | Y if vpc/zone/cidr change | Y | `DeleteVSwitch` after bounded ENI/Kvstore wait | Alchemy tags | `ClientToken` | Concurrent create is transient (`IncorrectVSwitchStatus`) | Describe by VPC/name | N | Pending/Available | Persisted redeploy | Y | — | Subclass + protocol + stack | PostgreSQL smoke passed; older Tair smoke reported Kvstore hold | Waiter is a safety net, not a substitute for Tair recycle-bin absence |
-| `ACK.ManagedCluster` | Y | Y | Modify/upgrade | Y if create identity changes | Y | `DeleteCluster` + task wait; ENIs can remain | Alchemy tags | None; observe by name | Accepted-create error recovered by v1 name inventory | `DescribeClustersV1`, region-scoped + paged | N | creating/running/deleting via task | Persisted redeploy/recovery | Y | kubeconfig not stored | Subclass + protocol + stack | Not connected | Advanced upgrade policies and live deletion-protection races unverified |
-| `ACK.NodePool` | Y | Y | Y | scaling-group identity | Y | Delete + task wait | Scaling-group Alchemy tags | None | N | Name lookup within the cluster | N | Task wait | Persisted redeploy/recovery | Y | — | Subclass + protocol + stack | Not connected | Advanced scaling/rollout controls not exhaustively simulated |
+| `VPC.Network` | Y | Y | Y (name/description) | Y if create identity changes | Y | `DeleteVpc` after bounded dependency wait (NAT/EIP/security-group/ENI stragglers) | Alchemy tags; unowned without them | `ClientToken` from Alchemy instance id | Observe by name; tokenized retry | DescribeVpcs pages | N | Pending (configuring), Available, Deleting | Persisted redeploy | Y | — | Subclass + protocol + stack | PostgreSQL and ACK smoke create/update/delete passed | No extra optional VPC features (IPv6, DNS, route tables) |
+| `VPC.VSwitch` | Y | Y | Y (name/description) | Y if vpc/zone/cidr change | Y | `DeleteVSwitch` after bounded ENI/Kvstore wait | Alchemy tags | `ClientToken` | Concurrent create is transient (`IncorrectVSwitchStatus`) | Describe by VPC/name | N | Pending/Available | Persisted redeploy | Y | — | Subclass + protocol + stack | PostgreSQL and ACK smoke passed; older Tair smoke reported Kvstore hold | Waiter is a safety net, not a substitute for Tair recycle-bin absence |
+| `ACK.ManagedCluster` | Y | Y | Modify/upgrade | Y if create identity changes | Y | `DeleteCluster` + task wait; ENIs can remain | Alchemy tags | None; observe by name | Accepted-create error recovered by v1 name inventory | `DescribeClustersV1`, region-scoped + paged | N | creating/running/deleting via task | Persisted redeploy/recovery | Y | kubeconfig not stored | Subclass + protocol + stack | Partial: ACK smoke: create, no-op, protection updates/drift, tags; see LIVE-VALIDATION.md | Upgrades/advanced policies unverified; Kubernetes API/Secret blocked by runner ACL permissions |
+| `ACK.NodePool` | Y | Y | Y | scaling-group identity | Y | Delete + task wait | Scaling-group Alchemy tags | None | N | Name lookup within the cluster | N | Task wait | Persisted redeploy/recovery | Y | — | Subclass + protocol + stack | Partial: ACK smoke: create, no-op, scaling 1 → 2 → 1; see LIVE-VALIDATION.md | Final-node drain incomplete; cleanup required cluster-level deletion; live image/advanced rollout unverified |
 | `ACK.Addon` | Y (install) | Y | Configure/upgrade | Compound identity | Y (uninstall) | Uninstall + task | Compound identity; silent adopt | None | N | Cluster/name | N | Task wait | Persisted redeploy | — | Config JSON | Subclass + protocol + stack | Not connected | Canary policies and component-specific configuration unverified |
 | `ACR.InstanceReference` | N (retained) | Y | N | N | No-op; nuke skip | Never deletes the paid instance | Retained reference | — | — | Get by id | N | RUNNING | Subclass + protocol read | Observed | — | Subclass + protocol | Read-only plan smoke | Purchase/delete is out of scope |
 | `ACR.Namespace` | Y | Y | Y | Compound identity | Y | Delete namespace | Compound identity; silent adopt | None | N | Get by instance+name | ACR `IsSuccess` envelope | NORMAL | Persisted redeploy | — | — | Subclass + protocol + stack | Not connected | Live behavior unverified |
@@ -77,7 +77,8 @@ loopback HTTP, with Alchemy state persisted between deploy/update/destroy calls:
   recovery, and child failures preventing parent teardown.
 - `src/protocol/ack-children.test.ts`: ROA paths and snake_case fields, addon
   array payloads, node image/tag changes, addon config/version changes, cluster
-  upgrade/protection, delayed and failed tasks, persisted recovery, regional v1
+  upgrade/protection, separate edition/configuration mutations and protection drift,
+  delayed and failed tasks, persisted recovery, regional v1
   inventory and child-before-parent deletion.
 - `src/protocol/instance-updates.test.ts`: RDS resize/serverless observations,
   private endpoint selection with a public endpoint present, SSL completion and
@@ -193,9 +194,9 @@ additions below. Cloud-init completion remains outside infrastructure readiness.
 
 | Capability | Implemented behavior | Local evidence | Connected evidence |
 | --- | --- | --- | --- |
-| ACK connection/kubeconfig | Temporary redacted kubeconfig; serializable connection, private/public endpoint; upstream Kubernetes adapter with token or mTLS | `kubernetes/integration.test.ts` SDK fake + loopback HTTPS | None |
-| Kubernetes Secret | Redacted UTF-8 data, base64 at apply, sanitized diagnostics; delegates upstream Manifest | Local HTTPS create/read/rotation/delete + error echo regression | None |
-| Desired resource inputs | Flat desired fields without 0.1.0 aliases, mutable changes in place, explicit-name replacement guard, authoritative saved IDs, ambiguous-name rejection | `protocol/review-regressions.test.ts`, ACK lifecycle tests, secret-input test | None for new transitions |
+| ACK connection/kubeconfig | Temporary redacted kubeconfig; serializable connection, private/public endpoint; upstream Kubernetes adapter with token or mTLS | `kubernetes/integration.test.ts` SDK fake + loopback HTTPS | Temporary private kubeconfig and adapter credential refresh verified; live HTTPS blocked |
+| Kubernetes Secret | Redacted UTF-8 data, base64 at apply, sanitized diagnostics; delegates upstream Manifest | Local HTTPS create/read/rotation/delete + error echo regression | Blocked by runner SLB ACL permission; no live Secret operations |
+| Desired resource inputs | Flat desired fields without 0.1.0 aliases, mutable changes in place, explicit-name replacement guard, authoritative saved IDs, ambiguous-name rejection | `protocol/review-regressions.test.ts`, ACK lifecycle tests, secret-input test | PostgreSQL rerun and ACK smoke cover the recorded desired-state transitions |
 | VPC EIP/NAT/SNAT | Tagged EIP/NAT, association and source-switch SNAT, bandwidth/tag drift; replacement preserves one final graph | `protocol/connectivity.test.ts` persisted stack with actual SDK wire | None |
 | RAM Role/Policy/Attachment + RRSA | Scoped OIDC trust, role policy, custom default policy versions, version-limit rotation, drift repair, ordered delete | `protocol/ram.test.ts` persisted stack with RAM wire format | None |
 | ACR Image | Upstream Docker build/push, temporary credentials, registry-observed digest; remote tags retained | `acr/image.test.ts` fake Docker and SDK | None |

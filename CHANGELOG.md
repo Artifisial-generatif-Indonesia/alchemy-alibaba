@@ -10,6 +10,11 @@ not claimed.
 
 - Fix named ACK/RDS replacement identity, ambiguous recovery and saved-ID lookup.
   Mutable ACK/RDS desired fields and ECS size/group changes update in place.
+- Separate ACK cluster-edition and configuration updates, waiting for each
+  category to converge. Live ACK accepted a combined request while ignoring
+  deletion protection; unchanged edition fields must not accompany that update.
+  Extend ACK task waits to about 40 minutes to accommodate its documented
+  30-minute drain window; explicit wait overrides remain honored.
 - Add redacted ACK credentials, temporary kubeconfig/connection support, and
   Kubernetes Secret over upstream Manifest. Upstream Kubernetes resources can
   connect to ACK without application-owned SDK authentication code.
@@ -19,8 +24,8 @@ not claimed.
   reconcile serverless force/compression settings and narrow unsupported spec fields.
 - Reuse Alchemy tag diffing and add lifecycle progress. Remove request-phase
   input bags and legacy normalization; 0.2.0 uses one desired-state contract.
-- Document resource composition in COMPOSITION.md. New lifecycle evidence is
-  local only; publishing and connected acceptance remain separate.
+- Document resource composition in COMPOSITION.md. Connected evidence is limited
+  to the recorded disposable smoke cases; publishing remains separate.
 
 - Add ECS instances, security groups, and IPv4 ingress rules, plus a persistent
   dev-stage example wiring private RDS/Tair allowlists to the VM IP. ECS uses
@@ -45,7 +50,7 @@ not claimed.
 
 ### Validation
 
-188 tests across 26 files, TypeScript checking, and build pass. Package validation
+191 tests across 26 files, TypeScript checking, and build pass. Package validation
 checks the exact file list, all twelve public imports, consumer TypeScript usage,
 and a fresh consumer audit with the documented dependency overrides.
 
@@ -58,6 +63,17 @@ Candidate `9c68310` repeated these checks with the 0.2.0 desired-state inputs:
 deployment through verified cleanup took 10 minutes 58 seconds, with the same
 documented ownership-cleanup intervention. See LIVE-VALIDATION.md for timings,
 the corrected test-password input, and the quote versus final-billing distinction.
+
+A disposable ACK Pro run verified cluster/worker creation, persisted no-op
+redeploys, tags, worker scaling 1 → 2 → 1, protection updates and drift repair,
+and temporary private kubeconfig retrieval with adapter credential refresh.
+The protection update exposed the combined-request bug fixed above. Live
+Kubernetes API/Secret operations were blocked by the runner's missing SLB ACL
+creation permission; the endpoint stayed private. See LIVE-VALIDATION.md for
+timings, teardown evidence, and remaining ACK coverage. The final-node drain
+remained incomplete and cleanup required a scoped cluster-level deletion.
+All tracked compute/network resources are absent; worker RAM-role removal
+could not be independently verified because RAM read permissions were denied.
 
 ### Compatibility and limitations
 

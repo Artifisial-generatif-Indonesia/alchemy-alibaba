@@ -1,8 +1,9 @@
 # Disposable-stage validation
 
-Status: disposable PostgreSQL/VPC/vSwitch smoke runs executed on 2026-09-09
-(Jakarta), including a rerun of candidate `9c68310`. See the evidence and limitations below. Other scenarios remain
-unverified against live infrastructure.
+Status: disposable PostgreSQL/VPC/vSwitch and ACK smoke runs executed on
+2026-09-09 (Jakarta), including a PostgreSQL rerun of candidate `9c68310`.
+See the evidence and limitations below. The live Kubernetes Secret test was
+blocked by missing SLB ACL permissions; other unlisted scenarios remain unverified.
 This runbook does not authorize cloud access, purchases, or data deletion.
 
 ## Inputs required before execution
@@ -222,6 +223,94 @@ The authorized validation budget was USD 30. This run supports a minutes-scale
 estimate for this specific RDS/VPC smoke, not an estimate for the full provider
 matrix. ECS, ACK, Kubernetes, ACR, RAM, Tair, NAT, resize and restore were not
 exercised by this rerun.
+
+## 0.2.0 ACK smoke (2026-09-09 Jakarta)
+
+Starting from candidate `744fdc7`, the disposable stage used ACK Pro
+(`ack.pro.small`), Kubernetes `1.36.2-aliyun.1`, Flannel, containerd `2.3.4`,
+and an Alibaba Linux 3 container-optimized image in Jakarta zone A. A dedicated
+VPC/vSwitch held an ACK-managed NAT gateway, EIP, private API load balancer,
+security group, and worker role. Workers were PostPaid `ecs.u1-c1m2.large`
+(2 vCPU / 4 GB), each with a 40 GB PL1 ESSD. State and synthetic credentials
+stayed in a private persistent directory outside this repository.
+
+| Operation | Measured duration | Outcome |
+| --- | --- | --- |
+| Initial cluster and one-worker deployment | 304 seconds | Four Alchemy resources created |
+| Unchanged redeploys in fresh processes | About 4 seconds | No mutations; stable IDs |
+| Scale 1 → 2 and change tags | 67 seconds | Two healthy workers reported by ACK; stable cluster/pool IDs |
+| Scale 2 → 1 | 107 seconds | One healthy worker reported by ACK |
+| Protection on/off after provider fix | 4.8 / 4.3 seconds | Independent API and state readback matched |
+| Repair controlled protection drift | 4.6 seconds | Reapply restored declared protection without replacement |
+| Scale final worker to zero | Interrupted after 434 seconds | Still in `DrainNodes`; not a pass |
+| Scoped cluster deletion through ACK | 347 seconds to observed absence | Cleanup intervention after drain/cancellation/pool-deletion limitations |
+| Resume Alchemy destroy | 15 seconds | Reconciled absent cluster/pool, deleted vSwitch/VPC, cleared resource state |
+
+The original protection update sent the unchanged `clusterSpec` alongside
+`deletionProtection: false`. ACK reported a successful asynchronous task but
+kept protection enabled. A scoped diagnostic request containing only the
+protection field succeeded, allowing the original waiter to finish after
+397 seconds. That assisted operation is **not** counted as a provider pass.
+The provider now separates edition and configuration updates and waits for each
+to converge, following the category-based approach in upstream EKS. A loopback
+regression reproduces the ignored field and covers simultaneous edition/protection
+changes, unchanged redeploys, and observed protection drift. The corrected
+protection lifecycle and drift repair then passed on this live cluster.
+
+Temporary private kubeconfig retrieval returned redacted credentials with a
+future expiration. Two upstream-adapter connections fetched fresh credentials
+twice; their certificate/key pairs matched. No password or kubeconfig private key
+appeared in inspected logs or resource attributes. This verifies credential
+acquisition and adapter preparation, **not** a live Kubernetes HTTPS handshake.
+
+The runner could read the SLB listener but `slb:CreateAccessControlList` returned
+HTTP 403 `Forbidden`. The API endpoint therefore remained private, and no public
+API EIP or ACL was created. Kubernetes API readiness, Namespace/Secret
+create/read/rotation/delete, and verified mTLS requests were **not run**. Those
+checks require runner connectivity, such as a private runner or permission to
+configure the dedicated load balancer's runner-/32 whitelist before public access.
+Node image changes, addon configuration/version changes, Kubernetes upgrades,
+RRSA, and advanced rollout controls also remain unverified live.
+
+The attempt to scale the final worker to zero remained in `DrainNodes`.
+The local waiter was interrupted after 434 seconds with state preserved; zero
+workers was not verified. ACK rejected cancellation (`ErrPauseTask` /
+`TaskOperationNotSupported`) and forced pool deletion while the pool was
+`removing_nodes` (`InvalidNodePoolStatus.Forbidden`). Worker-side diagnosis via
+ECS Cloud Assistant was also denied (`Forbidden.RAM`). Cleanup therefore used a
+scoped cluster-level `DeleteCluster`, with deletion protection disabled and the
+same declared managed-resource deletion policy. This was an explicit teardown
+intervention, not an unattended child-first Alchemy destroy pass.
+
+ACK documents a graceful drain window of up to 30 minutes. The shared 20-minute
+wait was too short for that documented window, so ACK asynchronous tasks now
+allow approximately 40 minutes by default, with explicit `wait` overrides
+preserved. Local tests cover a task completing after the old observation budget
+and an explicitly shorter timeout. This run did not establish that the live
+drain would have completed on its own. System-pod disruption constraints are a possible
+cause, but were not verified because Kubernetes access was unavailable.
+Reference: [ACK node removal and drain behavior](https://www.alibabacloud.com/help/en/ack/ack-managed-and-ack-dedicated/user-guide/remove-a-node-11).
+
+By **02:41:28 UTC**, independent inventory confirmed the cluster, node pool,
+scaling group, both worker instances and disks, ENIs, NAT gateway, EIP, security
+group, load balancer, vSwitch, and VPC absent, with zero remaining resource state
+rows. Final inspection of 20 test logs found no synthetic secrets or private keys.
+The full deployment-to-inventory window was **42 minutes 35 seconds**, including
+debugging, local fixes/checks, permission diagnosis, and the cleanup intervention;
+it is not a normal deploy/destroy benchmark.
+
+Worker RAM-role removal could **not** be independently verified: both `GetRole`
+and `ListRoles` returned HTTP 403 `NoPermission`. Its identity remains in the
+private cleanup record for follow-up by an authorized operator. ACK reported
+successful cluster deletion, but that is not proof that the role was removed.
+Final billing remains unverified.
+
+The live ECS quote was **USD 0.084028 per worker-hour**, including its system
+disk. ACK management and managed NAT/EIP/load-balancer/network charges are
+additional. The private plan reserved USD 8 within the user's USD 30 validation
+budget and capped this stage at four hours; this is a spending allowance, not a
+measured bill. The short second-worker interval and hourly rounding must be
+included when reviewing subsequent billing.
 
 ## 0.2.0 complete live validation plan
 
