@@ -16,7 +16,14 @@ test.each(["20.19.0", "22.11.0"])("release runtime rejects Node %s", version => 
 const directories = [];
 afterEach(() => directories.splice(0).forEach(dir => rmSync(dir, { recursive: true, force: true })));
 
-function run(mode = "success", args = []) {
+function environmentWith(overrides, inherited = process.env) {
+  const names = new Set(Object.keys(overrides).map(name => name.toLowerCase()));
+  const env = Object.fromEntries(Object.entries(inherited)
+    .filter(([name]) => !names.has(name.toLowerCase())));
+  return { ...env, ...overrides };
+}
+
+function run(mode = "success", args = [], inheritedEnv = {}) {
   const root = mkdtempSync(path.join(tmpdir(), "alchemy-publish-test-"));
   directories.push(root);
   mkdirSync(path.join(root, "scripts"));
@@ -74,7 +81,10 @@ function run(mode = "success", args = []) {
   if (mode === "dirty") writeFileSync(path.join(root, "untracked.txt"), "uncommitted");
   const result = spawnSync(process.execPath, [path.join(root, "scripts/publish-release.mjs"), ...args], {
     cwd: root, encoding: "utf8",
-    env: { ...process.env, npm_execpath: path.join(root, "fake-pnpm.cjs"), RELEASE_TEST_MODE: mode },
+    env: environmentWith(
+      { npm_execpath: path.join(root, "fake-pnpm.cjs"), RELEASE_TEST_MODE: mode },
+      { ...process.env, ...inheritedEnv },
+    ),
   });
   const calls = existsSync(path.join(root, "calls.jsonl"))
     ? readFileSync(path.join(root, "calls.jsonl"), "utf8").trim().split("\n").map(JSON.parse) : [];
@@ -96,6 +106,17 @@ test("dry run validates without authentication or registry publication", () => {
   expect(result.calls.map(args => args[0])).toEqual(["install", "run", "publish"]);
   expect(result.calls.at(-1)).toContain("--dry-run");
 });
+
+test.each(["NPM_EXECPATH", "NpM_ExEcPaTh"])(
+  "replaces inherited %s without invoking it",
+  inheritedName => {
+    const result = run("success", ["--dry-run"], {
+      [inheritedName]: path.join("C:\\", "must-not-run", "pnpm.exe"),
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.calls.map(args => args[0])).toEqual(["install", "run", "publish"]);
+  },
+);
 
 test("local pnpm stores created during installation do not block publication", () => {
   const result = run("local-stores");
