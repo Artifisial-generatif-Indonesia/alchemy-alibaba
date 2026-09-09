@@ -121,7 +121,7 @@ export class RoaResources {
           { nodepool_id: nodepoolId },
         );
       }
-      if (!pool) return error("NodePool.NotFound", 404);
+      if (!pool) return error("ErrorNodePoolNotFound", 404);
       if (method === "GET") return ok({ ...pool });
       if (method === "PUT") {
         pool.status.state = "updating";

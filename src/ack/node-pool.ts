@@ -61,6 +61,7 @@ export type NodePoolProps = NodePoolCreate &
   Omit<SecretInput<ACK.ModifyClusterNodePoolRequest>, keyof NodePoolCreate> & {
     readonly clusterId: string;
     readonly name?: string;
+    /** force permits deleting a populated pool; ACK can still drain nodes and honor disruption budgets. */
     readonly delete?: ModelInput<ACK.DeleteClusterNodepoolRequest>;
     readonly tags?: Readonly<Record<string, string>>;
   };

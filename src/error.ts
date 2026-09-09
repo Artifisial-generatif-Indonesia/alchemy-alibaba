@@ -271,6 +271,7 @@ const absentResourceCodes: Record<AlibabaService, ReadonlySet<string>> = {
     "NotFound",
     "Cluster.NotFound",
     "ErrorClusterNotFound",
+    "ErrorNodePoolNotFound",
     "NodePool.NotFound",
     "Nodepool.NotFound",
     "Addon.NotFound",

@@ -8,6 +8,9 @@ not claimed.
 
 ### Changes
 
+- Recognize ACK `ErrorNodePoolNotFound` as successful absence during cleanup.
+  Document that forced node-pool deletion can still honor disruption budgets.
+
 - Compare ECS auto-release timestamps at Alibaba's minute precision, avoiding
   false drift and readiness timeouts when the input includes seconds. Retry
   attached-disk expansion while a concurrent VM resize restarts the instance;
