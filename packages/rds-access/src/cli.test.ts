@@ -43,7 +43,7 @@ function harness(environment: Record<string, string> = env) {
         ),
       ),
   );
-  const command = makeCommand(createLayer);
+  const command = makeCommand({ rds: createLayer });
   const run = (args: string[]) =>
     Effect.runPromise(
       Command.runWith(command, { version: "0.1.0", renderErrors: false })(args).pipe(

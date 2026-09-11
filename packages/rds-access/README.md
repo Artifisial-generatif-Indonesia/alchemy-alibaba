@@ -1,9 +1,10 @@
 # alibaba-rds-access
 
-Manage a developer laptop's Alibaba Cloud RDS IP allowlist from the terminal.
-Run `rds-access refresh` before migrations, database tooling, or debugging;
-run `rds-access revoke` when finished. Refresh replaces your previous IP when
-you change networks.
+Manage a developer laptop's Alibaba Cloud RDS IP allowlist from the terminal,
+and plan or apply repeatable read-only onboarding of an existing RDS database
+into a Drizzle Gateway appliance. Run `rds-access refresh` before migrations,
+database tooling, or debugging; run `rds-access revoke` when finished. Refresh
+replaces your previous IP when you change networks.
 
 This is an independently versioned workspace package in the `alchemy-alibaba`
 repository. It uses the official Alibaba RDS and credentials SDKs with Effect;
@@ -114,7 +115,86 @@ or run migrations. Continue to use the application's migration credentials and
 TLS configuration. RDS control-plane confirmation does not prove that a SQL
 connection works; network propagation can take additional time.
 
+## Gateway onboarding
+
+`rds-access gateway plan|apply` onboards an existing database into a read-only
+Drizzle Gateway appliance without registering the connection itself; a gateway
+repository wraps these commands to add the Gateway connection and the relay
+Worker allowlist. The package owns every Alibaba decision: RDS private endpoint
+and account discovery, VPC peering/route planning, the dedicated allowlist
+group, and PostgreSQL read-only grants.
+
+```sh
+pnpm exec rds-access gateway plan \
+  --instance pgm-yourinstance --database odin --name "Odin staging" --json
+
+pnpm exec rds-access gateway apply \
+  --instance pgm-yourinstance --database odin --name "Odin staging" \
+  --account-password-file ./local/.secrets/odin.password \
+  --admin-account rds_master --admin-password-file ./local/.secrets/admin.password
+```
+
+Plan is read-only. Apply is idempotent and safe to rerun after a partial
+failure: it re-reads the current state and only changes what differs.
+
+### What the plan covers
+
+- **Connectivity.** The gateway's ECS/VPC topology is discovered by the
+  `application=agia-rds-gateway` tag (or `--gateway-instance-id`). Same-VPC
+  databases need nothing. For a different VPC in the same region, an existing
+  activated peering is reused and only missing routes are planned. With
+  `--create-peering`, a missing same-region peering is created and accepted.
+  Cross-region, cross-account, overlapping-CIDR, ambiguous peering, and
+  conflicting-route setups are refused with a specific message.
+- **Allowlist.** A single dedicated group (default `gateway`,
+  `--whitelist-group`) holds only the gateway's private IP. No other group is
+  read or written.
+- **Account.** The account (default `gateway_ro`) is created as a `Normal RDS`
+  account when absent and reused otherwise; privileged accounts are refused.
+- **Grants.** Read-only is enforced in PostgreSQL: `CONNECT`, schema `USAGE`,
+  `SELECT` on existing tables, `REVOKE CREATE`, and
+  `default_transaction_read_only = on`. Pass `--owner-role` once per role that
+  creates future tables to add `ALTER DEFAULT PRIVILEGES` for those roles.
+  Owner roles are never guessed.
+- **Verification.** After apply, the tool reconnects as the database account
+  and checks the actual identity, `transaction_read_only`, USAGE, SELECT on
+  every existing table in the named schemas, absence of write privileges
+  (`bool_or`, so one writable schema is enough to fail), and the default
+  privileges for the named owner roles. If verification cannot connect yet
+  (for example before connectivity is repaired on a first run), the plan
+  records it as pending and continues instead of failing.
+
+### Secrets
+
+No secret is accepted as a flag. `--account-password-file` is a 0600 file that
+is read when present and created with a generated password when absent, so
+reruns reuse it. `--admin-password-file` supplies the privileged account used
+only to apply missing grants; if permissions already verify, the admin secret
+is never needed. The generated password is never printed.
+
+### Running SQL elsewhere
+
+The package runs SQL with a local `pg.Client`, so the invoking host must reach
+the RDS private endpoint. Embedders can replace that layer:
+`postgresLayerFromPromise({ connect })` accepts a Promise-based client, and
+`runGatewayPlan` / `runGatewayApply` execute the whole flow without importing
+Effect. The gateway repository uses this to run SQL on the appliance through
+Cloud Assistant and the Gateway loopback API.
+
+### Supported scope
+
+Same-region, same-account VPC peering; PostgreSQL; existing databases (the
+tool never creates or drops a database); normal RDS accounts; IPv4 allowlists.
+Peering creation requires the VpcPeer API permissions in addition to the
+RDS permissions. Direct package CLI usage requires the invocation host to
+reach the RDS private endpoint; only the planning and control-plane calls are
+reachable from outside the VPC. Route reuse follows longest-prefix routing: the
+most specific covering peering route wins over a default NAT route, while a
+more specific route through another next hop is refused. Missing routes are
+created as host `/32`s.
+
 ## How entries are managed
+
 
 Each developer gets a deterministic `dev_<hash>_<network>` group, exactly
 32 characters long. The hash retains 96 bits of the case-insensitive developer
@@ -199,6 +279,18 @@ await Effect.runPromise(
 `planAccess(target, ip)` previews refresh; `planAccess(target)` previews revoke.
 `revokeAccess(target)` revokes. `detectIPv4(url)` uses an injected Effect
 `HttpClient`, allowing callers to choose their own IP detection service.
+
+Gateway onboarding is exposed through `planGatewayOnboarding(input, options)`
+and `applyGatewayOnboarding(input, options)`. Both take an injected
+`GatewayApi` layer (`gatewayApiLayer`) for Alibaba calls and a `Postgres`
+layer (`postgresLayer` or `postgresLayerFromPromise`) for SQL; SDK fakes and
+an in-memory or remote PostgreSQL client can replace either. Promise-friendly
+`runGatewayPlan`, `runGatewayApply`, `runPostgresQuery`,
+`runPostgresStatements`, `readPasswordFileAsync`, `ensurePasswordFileAsync`,
+`redactedMake` and `redactedValue` helpers let non-Effect callers drive the
+same flow. `generatePassword`, `buildGrantStatements`,
+`buildVerificationQueries`, `interpretVerification`, `planConnectivity`,
+`cidrContains` and `cidrOverlaps` are exported for embedding and review.
 
 ## Package maintenance
 

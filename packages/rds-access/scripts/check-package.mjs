@@ -39,7 +39,7 @@ try {
   for (const file of files) {
     assert.ok(
       ["package.json", "README.md", "LICENSE"].includes(file) ||
-        /^dist\/[a-z]+\.(js|d\.ts)$/.test(file),
+        /^dist\/(?:[a-z][a-z-]*\/)*[a-z][a-z-]*\.(js|d\.ts)$/.test(file),
       `Unexpected file ${file}`,
     );
   }
@@ -57,9 +57,12 @@ try {
     }),
   );
   // No provider peers or repository overrides: exercise this package on its own.
+  // The platform-node child range floats to newer release candidates whose
+  // effect peer no longer matches the pinned effect; keep the verified pair.
   await writeFile(
     path.join(consumer, "pnpm-workspace.yaml"),
-    'allowBuilds:\n  "@alicloud/openapi-core": false\n  "msgpackr-extract": false\n',
+    'allowBuilds:\n  "@alicloud/openapi-core": false\n  "msgpackr-extract": false\n' +
+      'overrides:\n  "@effect/platform-node-shared": "4.0.0-rc.112"\n',
   );
   pnpm(["install", "--no-frozen-lockfile", "--registry=https://registry.npmjs.org/"], consumer);
   const installed = JSON.parse(pnpm(["list", "--depth", "Infinity", "--json"], consumer));
