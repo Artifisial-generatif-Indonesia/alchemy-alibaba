@@ -78,6 +78,9 @@ importers:
       '@alicloud/rds20140815':
         specifier: 15.9.0
         version: 15.9.0
+      '@alicloud/sts20150401':
+        specifier: 1.2.0
+        version: 1.2.0
       '@alicloud/vpc20160428':
         specifier: 7.2.5
         version: 7.2.5
@@ -193,6 +196,9 @@ packages:
 
   '@alicloud/rds20140815@15.9.0':
     resolution: {integrity: sha512-xoN46T3iI3CylNZfwdu9pgeZxOaED1mvwSTxwomx9GDZuLZeA0EYvWbmdSA2+Ba96D6sAiYY1h5LXzq4EE7nuA==}
+
+  '@alicloud/sts20150401@1.2.0':
+    resolution: {integrity: sha512-QAO+W8dDbY7uS6YS/NyGgMupo5sNzf0QrJs8FiRX7Bm49c56S29f4iJUjJozfnrFph1AGHEQoN9RlwT/Jz/cGg==}
 
   '@alicloud/tea-typescript@1.8.0':
     resolution: {integrity: sha512-CWXWaquauJf0sW30mgJRVu9aaXyBth5uMBCUc+5vKTK1zlgf3hIqRUjJZbjlwHwQ5y9anwcu18r48nOZb7l2QQ==}
@@ -2235,6 +2241,15 @@ snapshots:
       - utf-8-validate
 
   '@alicloud/rds20140815@15.9.0':
+    dependencies:
+      '@alicloud/openapi-core': 1.0.8
+      '@darabonba/typescript': 1.0.5
+    transitivePeerDependencies:
+      - bufferutil
+      - supports-color
+      - utf-8-validate
+
+  '@alicloud/sts20150401@1.2.0':
     dependencies:
       '@alicloud/openapi-core': 1.0.8
       '@darabonba/typescript': 1.0.5

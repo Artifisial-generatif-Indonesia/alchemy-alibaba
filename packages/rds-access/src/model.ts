@@ -6,6 +6,16 @@ export class AccessError extends Schema.TaggedError<AccessError>()("AccessError"
   message: Schema.String,
   operation: Schema.optional(Schema.String),
   code: Schema.optional(Schema.String),
+  /** Alibaba's error message, sanitized and length-bounded. */
+  serviceMessage: Schema.optional(Schema.String),
+  requestId: Schema.optional(Schema.String),
+  /** AccessDeniedDetail fields; the encoded diagnostic message is never retained. */
+  authAction: Schema.optional(Schema.String),
+  noPermissionType: Schema.optional(Schema.String),
+  policyType: Schema.optional(Schema.String),
+  /** Credential source and, when resolvable, the RAM user/role name. */
+  credentials: Schema.optional(Schema.String),
+  caller: Schema.optional(Schema.String),
 }) {}
 
 export const Developer = Schema.String.check(

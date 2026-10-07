@@ -1,5 +1,5 @@
 import { NodeServices } from "@effect/platform-node";
-import { ConfigProvider, Effect, Layer } from "effect";
+import { ConfigProvider, Console, Effect, Layer } from "effect";
 import { Command } from "effect/unstable/cli";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import { describe, expect, it, vi } from "vitest";
@@ -30,6 +30,7 @@ function harness(environment: Record<string, string> = env) {
       verifyInstance: verify,
       groups: () => Effect.succeed([]),
       setGroup: () => Effect.die("Unexpected write"),
+      caller: Effect.succeed("RAM user alice"),
     }),
   );
   const detect = vi.fn(
@@ -44,6 +45,10 @@ function harness(environment: Record<string, string> = env) {
       ),
   );
   const command = makeCommand({ rds: createLayer });
+  const lines: string[] = [];
+  const testConsole = Object.assign(Object.create(console), {
+    log: (...args: ReadonlyArray<unknown>) => lines.push(args.join(" ")),
+  });
   const run = (args: string[]) =>
     Effect.runPromise(
       Command.runWith(command, { version: "0.1.0", renderErrors: false })(args).pipe(
@@ -53,9 +58,10 @@ function harness(environment: Record<string, string> = env) {
           ConfigProvider.fromEnvRecord(environment),
         ),
         Effect.provideService(HttpClient.HttpClient, HttpClient.make(detect)),
+        Effect.provideService(Console.Console, testConsole),
       ),
     );
-  return { run, createLayer, verify, detect };
+  return { run, createLayer, verify, detect, lines };
 }
 
 describe("CLI configuration", () => {
@@ -65,6 +71,7 @@ describe("CLI configuration", () => {
     expect(h.createLayer).toHaveBeenCalledWith({
       regionId: env.ALIBABA_CLOUD_REGION,
       profile: "development",
+      credentials: { kind: "environment", profile: "development" },
     });
     expect(h.verify).toHaveBeenCalledWith(
       expect.objectContaining({ instanceId: "pgm-example", developer: "alice@example.com" }),
@@ -75,7 +82,11 @@ describe("CLI configuration", () => {
   it("lets flags override environment settings", async () => {
     const h = harness();
     await h.run(["plan", ...flags, "--ip", "203.0.113.10", "--json"]);
-    expect(h.createLayer).toHaveBeenCalledWith({ regionId: "cn-hangzhou", profile: "other" });
+    expect(h.createLayer).toHaveBeenCalledWith({
+      regionId: "cn-hangzhou",
+      profile: "other",
+      credentials: { kind: "flag", profile: "other" },
+    });
     expect(h.verify).toHaveBeenCalledWith(
       expect.objectContaining({ instanceId: "pgm-other", developer: "bob@example.com" }),
     );
@@ -88,6 +99,21 @@ describe("CLI configuration", () => {
     expect(h.createLayer).toHaveBeenCalledWith({
       regionId: env.ALIBABA_CLOUD_REGION,
       profile: undefined,
+      credentials: { kind: "default" },
+    });
+  });
+
+  it("shows which identity plan runs as before refresh", async () => {
+    const h = harness();
+    await h.run(["plan", "--ip", "203.0.113.10"]);
+    expect(h.lines.join("\n")).toContain(
+      'Credentials: profile "development" (ALIBABA_CLOUD_PROFILE), RAM user alice',
+    );
+    await h.run(["plan", "--profile", "readonly", "--ip", "203.0.113.10", "--json"]);
+    expect(JSON.parse(h.lines.at(-1)!)).toMatchObject({
+      applied: false,
+      credentials: 'profile "readonly" (--profile)',
+      caller: "RAM user alice",
     });
   });
 
