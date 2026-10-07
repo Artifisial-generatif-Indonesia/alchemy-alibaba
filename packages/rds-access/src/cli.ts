@@ -2,7 +2,7 @@ import { Config, Console, Effect, Option, Redacted } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { FetchHttpClient } from "effect/unstable/http";
 import { planAccess, refreshAccess, revokeAccess } from "./access.ts";
-import { rdsApiLayer } from "./alibaba.ts";
+import { describeCredentials, RdsApi, rdsApiLayer, type CredentialSource } from "./alibaba.ts";
 import { gatewayApiLayer as createGatewayApiLayer } from "./gateway/alibaba.ts";
 import { SqlIdentifier } from "./gateway/model.ts";
 import type { GatewayOnboardingInput, GatewayOnboardingPlan } from "./gateway/model.ts";
@@ -32,10 +32,13 @@ const targetFlags = {
     Flag.withSchema(Developer),
     Flag.withDescription("Stable personal ID, such as your work email (or RDS_ACCESS_DEVELOPER)"),
   ),
+  // credentialSource applies the ALIBABA_CLOUD_PROFILE fallback so that
+  // failures can name where the profile came from.
   profile: Flag.string("profile").pipe(
-    Flag.withFallbackConfig(Config.string("ALIBABA_CLOUD_PROFILE")),
     Flag.optional,
-    Flag.withDescription("Named aliyun CLI profile; otherwise use the SDK credential chain"),
+    Flag.withDescription(
+      "Named aliyun CLI profile (or ALIBABA_CLOUD_PROFILE); otherwise use the SDK credential chain",
+    ),
   ),
   networkType: Flag.choice("network-type", ["MIX", "VPC", "Classic"]).pipe(
     Flag.withDefault("MIX"),
@@ -43,6 +46,18 @@ const targetFlags = {
   ),
   json: Flag.boolean("json").pipe(Flag.withDefault(false)),
 };
+
+/** Flags take precedence over ALIBABA_CLOUD_PROFILE, as with other settings. */
+const credentialSource = Effect.fn("credentialSource")(function* (
+  flag: Option.Option<string>,
+): Effect.fn.Return<CredentialSource, Config.ConfigError> {
+  if (Option.isSome(flag)) return { kind: "flag", profile: flag.value };
+  const environment = yield* Config.option(Config.string("ALIBABA_CLOUD_PROFILE"));
+  return Option.isSome(environment)
+    ? { kind: "environment", profile: environment.value }
+    : { kind: "default" };
+});
+
 const ipFlag = Flag.string("ip").pipe(
   Flag.withSchema(HostIPv4),
   Flag.optional,
@@ -51,12 +66,20 @@ const ipFlag = Flag.string("ip").pipe(
   ),
 );
 
-const printPlan = (plan: AccessPlan, json: boolean, applied: boolean) =>
+interface Identity {
+  readonly credentials: string;
+  readonly caller: string | undefined;
+}
+
+const printPlan = (plan: AccessPlan, json: boolean, applied: boolean, identity?: Identity) =>
   Console.log(
     json
-      ? JSON.stringify({ ...plan, applied })
+      ? JSON.stringify({ ...plan, applied, ...identity })
       : `${plan.instanceId} (${plan.regionId}) / ${plan.groupName}\n` +
           `${plan.previous.join(", ") || "absent"} → ${plan.desired.join(", ") || "absent"}\n` +
+          (identity
+            ? `Credentials: ${identity.credentials}${identity.caller ? `, ${identity.caller}` : ""}\n`
+            : "") +
           (applied
             ? plan.changed
               ? "RDS confirmed the allowlist update."
@@ -338,19 +361,28 @@ export const makeCommand = (
   } = {},
 ) => {
   const createLayer = layers.rds ?? rdsApiLayer;
+  const layerFor = Effect.fn("layerFor")(function* (args: {
+    readonly regionId: string;
+    readonly profile: Option.Option<string>;
+  }) {
+    const credentials = yield* credentialSource(args.profile);
+    return {
+      credentials,
+      layer: createLayer({
+        regionId: args.regionId,
+        profile: credentials.kind === "default" ? undefined : credentials.profile,
+        credentials,
+      }),
+    };
+  });
+
   const refresh = Command.make(
     "refresh",
     { ...targetFlags, ip: ipFlag },
     Effect.fn(function* (args) {
       const ip = Option.isSome(args.ip) ? args.ip.value : yield* detectIPv4(DEFAULT_IP_SERVICE_URL);
-      const plan = yield* refreshAccess(args, ip).pipe(
-        Effect.provide(
-          createLayer({
-            regionId: args.regionId,
-            profile: Option.getOrUndefined(args.profile),
-          }),
-        ),
-      );
+      const { layer } = yield* layerFor(args);
+      const plan = yield* refreshAccess(args, ip).pipe(Effect.provide(layer));
       yield* printPlan(plan, args.json, true);
     }),
   ).pipe(
@@ -363,14 +395,8 @@ export const makeCommand = (
     "revoke",
     targetFlags,
     Effect.fn(function* (args) {
-      const plan = yield* revokeAccess(args).pipe(
-        Effect.provide(
-          createLayer({
-            regionId: args.regionId,
-            profile: Option.getOrUndefined(args.profile),
-          }),
-        ),
-      );
+      const { layer } = yield* layerFor(args);
+      const plan = yield* revokeAccess(args).pipe(Effect.provide(layer));
       yield* printPlan(plan, args.json, true);
     }),
   ).pipe(Command.withDescription("Remove remote access granted by your developer group"));
@@ -387,15 +413,16 @@ export const makeCommand = (
         : Option.isSome(args.ip)
           ? args.ip.value
           : yield* detectIPv4(DEFAULT_IP_SERVICE_URL);
-      const result = yield* planAccess(args, ip).pipe(
-        Effect.provide(
-          createLayer({
-            regionId: args.regionId,
-            profile: Option.getOrUndefined(args.profile),
-          }),
-        ),
-      );
-      yield* printPlan(result, args.json, false);
+      const { credentials, layer } = yield* layerFor(args);
+      const { result, caller } = yield* Effect.gen(function* () {
+        const api = yield* RdsApi;
+        const result = yield* planAccess(args, ip);
+        return { result, caller: api.caller === undefined ? undefined : yield* api.caller };
+      }).pipe(Effect.provide(layer));
+      yield* printPlan(result, args.json, false, {
+        credentials: describeCredentials(credentials),
+        caller,
+      });
     }),
   ).pipe(
     Command.withDescription("Preview a refresh, or a revoke with --revoke, without changing RDS"),
@@ -414,7 +441,7 @@ export const makeCommand = (
 
 export const command = makeCommand();
 
-export const run = Command.run(command, { version: "0.1.0" }).pipe(
+export const run = Command.run(command, { version: "0.1.1" }).pipe(
   Effect.provide(FetchHttpClient.layer),
   Effect.provideService(FetchHttpClient.RequestInit, { redirect: "error" }),
 );

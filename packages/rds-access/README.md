@@ -9,7 +9,8 @@ replaces your previous IP when you change networks.
 This is an independently versioned workspace package in the `alchemy-alibaba`
 repository. It uses the official Alibaba RDS and credentials SDKs with Effect;
 it has no dependency on Alchemy, Cloudflare, or an application's migration tool.
-Version `0.1.0` is a local candidate and has not been published by this change.
+Version `0.1.0` is published on npm; `0.1.1` is a local candidate and has not been
+published by this change. See [CHANGELOG.md](CHANGELOG.md).
 
 ## Use from this checkout
 
@@ -31,7 +32,7 @@ pnpm --filter alibaba-rds-access pack --pack-destination ../../artifacts/rds-acc
 Then, from your application checkout, substitute the actual tarball path:
 
 ```sh
-pnpm add -D /path/to/alchemy-alibaba/artifacts/rds-access/alibaba-rds-access-0.1.0.tgz
+pnpm add -D /path/to/alchemy-alibaba/artifacts/rds-access/alibaba-rds-access-0.1.1.tgz
 pnpm exec rds-access --help
 ```
 
@@ -256,6 +257,49 @@ is an operational convention, not a RAM permission boundary. See the
 [RDS authorization reference](https://www.alibabacloud.com/help/zh/doc-detail/2631988.html)
 and [instance-read authorization](https://help.aliyun.com/en/rds/developer-reference/api-rds-2014-08-15-describedbinstanceattribute).
 
+## Troubleshooting
+
+### A command fails with `Forbidden` or `NoPermission`
+
+The identity behind the selected credentials lacks an RDS action. The error
+names Alibaba's code and message, the RequestId, the denied action, and the
+credentials that were used:
+
+```text
+ModifySecurityIps failed (Forbidden): User not authorized to operate on the specified resource, or this API does not support RAM.
+RequestId: 5E4C1F8A-0D2B-4D7A-9C6E-0123456789AB
+Denied action: rds:ModifySecurityIps (NoPermissionType ImplicitDeny, PolicyType AccountLevelIdentityBasedPolicy)
+Credentials: profile "readonly" (--profile), RAM user readonly-bot
+This identity lacks rds:ModifySecurityIps on pgm-yourinstance; use a profile that has it.
+```
+
+This is not a request-format problem. The usual cause is the wrong profile:
+`--profile` wins over `ALIBABA_CLOUD_PROFILE`, and without either the SDK
+default credential chain is used (environment keys, the aliyun CLI's current
+profile, instance roles, and so on). Select a profile whose RAM user/role has
+the actions listed under [Profile permissions](#profile-permissions), or ask an
+administrator to grant them. `plan` prints the same `Credentials:` line, so a
+read-only identity is visible before `refresh`: `plan` succeeds with the two
+read actions while `refresh` and `revoke` also need `rds:ModifySecurityIps`.
+
+On permission errors the CLI makes one best-effort `sts:GetCallerIdentity` call
+and prints only the RAM user or role name; no account or principal ID is shown.
+If that lookup fails or takes longer than five seconds, it is skipped and the
+original error is reported unchanged. Quote the RequestId when asking Alibaba
+support or searching ActionTrail.
+
+Errors keep Alibaba's message (single line, at most 300 characters,
+credential-like values redacted) and the AccessDeniedDetail fields `AuthAction`,
+`NoPermissionType` and `PolicyType`. The `EncodedDiagnosticMessage` is never
+printed or stored. The same values are available as fields on `AccessError`
+(`code`, `serviceMessage`, `requestId`, `authAction`, `noPermissionType`,
+`policyType`, `credentials`, `caller`) for Effect API callers.
+
+### A command times out
+
+Writes are sent once. Run `plan` to see whether Alibaba applied the change
+before retrying.
+
 ## Effect API
 
 ```ts
@@ -276,6 +320,8 @@ await Effect.runPromise(
 );
 ```
 
+Pass `credentials` (a `CredentialSource`) to `rdsApiLayer` to control how errors
+name the credential source; it defaults to the `profile` option or the SDK chain.
 `planAccess(target, ip)` previews refresh; `planAccess(target)` previews revoke.
 `revokeAccess(target)` revokes. `detectIPv4(url)` uses an injected Effect
 `HttpClient`, allowing callers to choose their own IP detection service.

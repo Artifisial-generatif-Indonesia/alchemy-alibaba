@@ -320,7 +320,7 @@ const makeSdk = (options: { readonly regionId: string; readonly profile?: string
     credential,
     connectTimeout: 5_000,
     readTimeout: 20_000,
-    userAgent: "alibaba-rds-access/0.1.0",
+    userAgent: "alibaba-rds-access/0.1.1",
   });
   const rds = new RdsClient(config);
   const ecs = new EcsClient(config);
